@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>schedule_builder</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="app-header">
+      <input id="project-name" type="text" placeholder="プロジェクト名" />
+      <div id="status-area"></div>
+    </header>
+
+    <section class="settings-panel">
+      <label>着手日 <input type="date" id="input-start-date" /></label>
+      <label>デッドライン <input type="date" id="input-target-date" /></label>
+      <button id="btn-reset-schedule" type="button" title="着手日から数珠つなぎで再計算">日程を着手日から再計算</button>
+      <button id="btn-open-assignees" type="button">担当マスタ…</button>
+      <button id="btn-open-holidays" type="button">祝日設定…</button>
+      <div class="spacer"></div>
+      <button id="btn-add-task" type="button" class="primary">＋ 工程を追加</button>
+    </section>
+
+    <section class="task-table-wrap">
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th style="width:32px;"></th>
+            <th>工程名</th>
+            <th style="width:160px;">担当</th>
+            <th style="width:80px;">営業日</th>
+            <th style="width:140px;">開始日</th>
+            <th style="width:140px;">終了日</th>
+            <th style="width:60px;">色</th>
+            <th style="width:90px;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="task-body"></tbody>
+      </table>
+    </section>
+
+    <section class="gantt-section">
+      <div class="gantt-main-container">
+        <div class="gantt-left-fixed">
+          <div class="row-header">
+            <div class="cell-name"><span>工程名</span></div>
+            <div class="cell-role">担当</div>
+          </div>
+          <div id="left-task-list"></div>
+        </div>
+        <div class="gantt-right-scroll" id="scroll-area">
+          <div id="calendar-header" style="width: max-content;">
+            <div class="month-row" id="month-row"></div>
+            <div class="day-row" id="day-row"></div>
+          </div>
+          <div id="chart-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="note-section">
+      <label>備考</label>
+      <textarea id="project-note" rows="3" placeholder="このスケジュールに関するメモ"></textarea>
+    </section>
+  </div>
+
+  <div id="modal-root" class="modal-root hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h3 id="modal-title">タイトル</h3>
+        <button id="modal-close" type="button">×</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+      <div class="modal-footer">
+        <button id="modal-ok" type="button" class="primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
