@@ -1,8 +1,8 @@
-version: 0.2.0
+version: 2.0.0
 files:
-  - url: schedule_builder-Setup-0.2.0.exe
-    sha512: eC1/5Mv+RLqff9zf6TQ9Yw0LgpMLIdZo80ofGhyNx7s17bZF8+3wwnQI92NKzCY846tEfYo74hojWHmacPD+eg==
-    size: 86054639
-path: schedule_builder-Setup-0.2.0.exe
-sha512: eC1/5Mv+RLqff9zf6TQ9Yw0LgpMLIdZo80ofGhyNx7s17bZF8+3wwnQI92NKzCY846tEfYo74hojWHmacPD+eg==
-releaseDate: '2026-05-25T18:29:30.660Z'
+  - url: schedule_builder-Setup-2.0.0.exe
+    sha512: xr0NOVnIiVwulxVsHa6+XSuAlYvzrWyl8g4NjXIg4CRPgPtHguHP54F2Z9y/g0oMhxf1K9gmmR3+RisN2RTDoQ==
+    size: 86055246
+path: schedule_builder-Setup-2.0.0.exe
+sha512: xr0NOVnIiVwulxVsHa6+XSuAlYvzrWyl8g4NjXIg4CRPgPtHguHP54F2Z9y/g0oMhxf1K9gmmR3+RisN2RTDoQ==
+releaseDate: '2026-05-25T19:10:47.700Z'
