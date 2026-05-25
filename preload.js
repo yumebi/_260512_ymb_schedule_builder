@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('api', {
   fetchHolidays: (opts) => ipcRenderer.invoke('holidays:fetch', opts || {}),
   loadLastState: () => ipcRenderer.invoke('state:loadLast'),
   saveLastState: (data) => ipcRenderer.invoke('state:saveLast', data),
-  onMenu: (cb) => ipcRenderer.on('menu-action', (_e, action) => cb(action)),
+  getVersion: () => ipcRenderer.invoke('app:version'),
+  onMenu: (cb) => ipcRenderer.on('menu-action', (_e, action, payload) => cb(action, payload)),
 });

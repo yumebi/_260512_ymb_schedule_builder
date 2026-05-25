@@ -819,8 +819,10 @@
     $('#btn-open-holidays').addEventListener('click', openHolidaysModal);
 
     if (window.api && window.api.onMenu) {
-      window.api.onMenu(async (action) => {
-        if (action === 'new') {
+      window.api.onMenu(async (action, payload) => {
+        if (action === 'open-recent') {
+          if (payload && payload.data) loadFromData(payload.data);
+        } else if (action === 'new') {
           const ok = await confirmModal('現在の編集内容は破棄されます。新規プロジェクトを作成しますか？');
           if (!ok) return;
           await window.api.newProject();
@@ -838,11 +840,17 @@
           if (!orientation) return;
           await window.api.exportExcel(snapshot(), orientation);
         } else if (action === 'about') {
+          const ver = window.api && window.api.getVersion
+            ? await window.api.getVersion()
+            : '';
           const body = document.createElement('div');
           body.style.padding = '24px 8px';
-          body.style.fontSize = '15px';
           body.style.textAlign = 'center';
-          body.textContent = 'author : ymb';
+          body.style.lineHeight = '2';
+          body.innerHTML = `
+            <div style="font-size:18px;font-weight:bold;margin-bottom:4px;">schedule_builder</div>
+            <div style="font-size:13px;color:#64748b;margin-bottom:16px;">v${ver}</div>
+            <div style="font-size:14px;">author : ymb</div>`;
           openModal('このアプリについて', body, () => {});
         }
       });
