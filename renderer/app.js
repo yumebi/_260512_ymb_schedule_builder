@@ -546,6 +546,57 @@
     });
   }
 
+  function exportOrientationModal() {
+    return new Promise((resolve) => {
+      const body = document.createElement('div');
+      body.style.padding = '12px 0';
+      body.innerHTML = `
+        <div style="margin-bottom:14px;font-size:14px;">出力方向を選択してください。</div>
+        <label style="display:flex;align-items:center;gap:10px;">
+          <span style="white-space:nowrap;">出力方向:</span>
+          <select id="export-orient-select" style="flex:1;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+            <option value="horizontal">横方向（日付を列に展開）</option>
+            <option value="vertical">縦方向（日付を行に展開）</option>
+          </select>
+        </label>`;
+
+      $('#modal-title').textContent = 'Excel出力';
+      const bodyEl = $('#modal-body');
+      bodyEl.innerHTML = '';
+      bodyEl.appendChild(body);
+
+      const footer = document.querySelector('#modal-root .modal-footer');
+      const origFooter = footer.innerHTML;
+      footer.innerHTML = `
+        <button type="button" id="modal-cancel">キャンセル</button>
+        <button type="button" id="modal-ok" class="primary">出力</button>
+      `;
+
+      $('#modal-root').classList.remove('hidden');
+
+      const getVal = () => {
+        const sel = document.getElementById('export-orient-select');
+        return sel ? sel.value : 'horizontal';
+      };
+      const cleanup = (orientation) => {
+        $('#modal-root').classList.add('hidden');
+        footer.innerHTML = origFooter;
+        document.removeEventListener('keydown', onKey, true);
+        resolve(orientation);
+      };
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); cleanup(null); }
+        else if (e.key === 'Enter') { e.preventDefault(); cleanup(getVal()); }
+      };
+      document.addEventListener('keydown', onKey, true);
+
+      document.getElementById('modal-ok').onclick = () => cleanup(getVal());
+      document.getElementById('modal-cancel').onclick = () => cleanup(null);
+      $('#modal-close').onclick = () => cleanup(null);
+      document.querySelector('#modal-root .modal-backdrop').onclick = () => cleanup(null);
+    });
+  }
+
   function openModal(title, bodyEl, onOk) {
     $('#modal-title').textContent = title;
     const body = $('#modal-body');
@@ -783,13 +834,15 @@
         } else if (action === 'saveAs') {
           await window.api.saveProjectAs(snapshot());
         } else if (action === 'exportExcel') {
-          await window.api.exportExcel(snapshot());
+          const orientation = await exportOrientationModal();
+          if (!orientation) return;
+          await window.api.exportExcel(snapshot(), orientation);
         } else if (action === 'about') {
           const body = document.createElement('div');
           body.style.padding = '24px 8px';
           body.style.fontSize = '15px';
           body.style.textAlign = 'center';
-          body.textContent = 'author：ymb / tokyo01';
+          body.textContent = 'author : ymb';
           openModal('このアプリについて', body, () => {});
         }
       });
