@@ -1,0 +1,107 @@
+# schedule_builder
+
+ガントチャート式スケジュール作成アプリ（Windows / macOS 対応デスクトップアプリ）
+
+---
+
+## 概要
+
+工程・担当・営業日数を入力するだけで、ガントチャートを自動生成します。  
+プロジェクトファイルへの保存、Excel（横方向 / 縦方向）への出力に対応しています。
+
+---
+
+## 主な機能
+
+- **ガントチャート自動生成** — 工程の開始日・終了日をリアルタイムで描画
+- **営業日計算** — 土日・祝日を除いた営業日ベースでスケジュールを算出
+- **祝日自動取得** — インターネットから日本の祝日データを取得して反映
+- **担当マスタ管理** — 担当者を自由に追加・編集・削除
+- **工程カラー設定** — プリセット18色 + OS ネイティブカラーピッカーで色指定
+- **Excel 出力（横方向 / 縦方向）** — 日付軸を列 or 行に展開した2種類のレイアウトで出力
+- **自動保存** — 編集内容を自動保存し、次回起動時に前回のデータを復元
+- **ドラッグ＆ドロップ** — 工程の並び順をドラッグで変更
+
+---
+
+## ダウンロード（Windows）
+
+[Releases](../../releases) から最新版をダウンロードしてください。
+
+| ファイル | 説明 |
+|---|---|
+| `schedule_builder Setup x.x.x.exe` | インストーラ版（スタートメニュー登録） |
+| `schedule_builder x.x.x.exe` | ポータブル版（インストール不要） |
+| `schedule_builder-x.x.x-win.7z` | 7z 圧縮アーカイブ |
+
+---
+
+## 開発環境のセットアップ
+
+### 必要なもの
+
+- [Node.js](https://nodejs.org/) LTS 版
+
+### セットアップ（Windows）
+
+```powershell
+# 依存パッケージのインストール（Node.js が未インストールの場合は自動で導入）
+.\setup.ps1
+
+# 開発モードで起動
+npm start
+```
+
+### セットアップ（macOS / Linux）
+
+```bash
+npm install
+npm start
+```
+
+---
+
+## ビルド
+
+### Windows
+
+> インストーラのビルドには **開発者モード** または **管理者権限** が必要です。  
+> 設定 → プライバシーとセキュリティ → 開発者向け → 開発者モード を ON にしてください。
+
+```powershell
+# Windows 向けビルド（インストーラ・ポータブル・7z）
+npm run build:win
+```
+
+### macOS
+
+```bash
+# macOS 向けビルド（dmg・zip）
+npm run build:mac
+```
+
+> macOS ビルドは macOS 上でのみ実行できます。
+
+---
+
+## 技術スタック
+
+| 項目 | 内容 |
+|---|---|
+| フレームワーク | [Electron](https://www.electronjs.org/) v33 |
+| UI | HTML / CSS / Vanilla JavaScript |
+| Excel 出力 | [ExcelJS](https://github.com/exceljs/exceljs) v4 |
+| ビルドツール | [electron-builder](https://www.electron.build/) v25 |
+| 祝日データ | [holidays-jp.github.io](https://holidays-jp.github.io/) |
+
+---
+
+## ライセンス
+
+UNLICENSED — 個人利用のみ
+
+---
+
+## Author
+
+author : ymb
