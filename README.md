@@ -24,15 +24,26 @@
 
 ---
 
-## ダウンロード（Windows）
+## ダウンロード
 
 [Releases](../../releases) から最新版をダウンロードしてください。
+
+### Windows
 
 | ファイル | 説明 |
 |---|---|
 | `schedule_builder Setup x.x.x.exe` | インストーラ版（スタートメニュー登録） |
 | `schedule_builder x.x.x.exe` | ポータブル版（インストール不要） |
-| `schedule_builder-x.x.x-win.7z` | 7z 圧縮アーカイブ |
+
+### macOS
+
+| ファイル | 説明 |
+|---|---|
+| `schedule_builder-x.x.x.dmg` | Intel Mac 用（x64） |
+| `schedule_builder-x.x.x-arm64.dmg` | Apple Silicon 用（M1 / M2 / M3） |
+
+> macOS では初回起動時に「開発元が未確認」と表示される場合があります。  
+> Finder でファイルを右クリック →「開く」を選択してください。
 
 ---
 
