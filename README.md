@@ -108,7 +108,7 @@ npm run build:mac
 
 ## ライセンス
 
-UNLICENSED — 個人利用のみ
+[MIT License](./LICENSE) © 2026 ymb
 
 ---
 

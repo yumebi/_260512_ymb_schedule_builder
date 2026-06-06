@@ -4,8 +4,7 @@
   "description": "YMB Schedule Builder — ガントチャート式スケジュール作成アプリ",
   "main": "main.js",
   "author": "",
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
