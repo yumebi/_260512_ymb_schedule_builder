@@ -35,7 +35,7 @@ async function openRecentFile(filePath) {
     const text = await fs.readFile(filePath, 'utf-8');
     const data = JSON.parse(text);
     currentProjectPath = filePath;
-    mainWindow.setTitle(`YMB Schedule Builder - ${path.basename(filePath)}`);
+    mainWindow.setTitle(appTitle(path.basename(filePath)));
     mainWindow.webContents.send('menu-action', 'open-recent', { data, filePath });
   } catch (e) {
     dialog.showErrorBox('読み込みエラー', `ファイルを開けませんでした:\n${filePath}\n\n${e.message || e}`);
@@ -56,7 +56,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'YMB Schedule Builder',
+    title: appTitle(),
     icon: path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -134,6 +134,13 @@ async function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function appTitle(filename) {
+  const ver = app.getVersion();
+  return filename
+    ? `YMB Schedule Builder v${ver} - ${filename}`
+    : `YMB Schedule Builder v${ver}`;
+}
+
 function sendMenu(action, payload) {
   if (mainWindow) mainWindow.webContents.send('menu-action', action, payload);
 }
@@ -152,7 +159,7 @@ ipcMain.handle('project:open', async () => {
     const text = await fs.readFile(filePath, 'utf-8');
     const data = JSON.parse(text);
     currentProjectPath = filePath;
-    mainWindow.setTitle(`YMB Schedule Builder - ${path.basename(filePath)}`);
+    mainWindow.setTitle(appTitle(path.basename(filePath)));
     await addRecentFile(filePath);
     return { data, filePath };
   } catch (e) {
@@ -175,7 +182,7 @@ ipcMain.handle('project:save', async (_e, data) => {
   try {
     await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
     currentProjectPath = filePath;
-    mainWindow.setTitle(`YMB Schedule Builder - ${path.basename(filePath)}`);
+    mainWindow.setTitle(appTitle(path.basename(filePath)));
     await addRecentFile(filePath);
     return { filePath };
   } catch (e) {
@@ -194,7 +201,7 @@ ipcMain.handle('project:saveAs', async (_e, data) => {
   try {
     await fs.writeFile(result.filePath, JSON.stringify(data, null, 2), 'utf-8');
     currentProjectPath = result.filePath;
-    mainWindow.setTitle(`schedule_builder - ${path.basename(result.filePath)}`);
+    mainWindow.setTitle(appTitle(path.basename(result.filePath)));
     await addRecentFile(result.filePath);
     return { filePath: result.filePath };
   } catch (e) {
@@ -205,7 +212,7 @@ ipcMain.handle('project:saveAs', async (_e, data) => {
 
 ipcMain.handle('project:new', async () => {
   currentProjectPath = null;
-  mainWindow.setTitle('YMB Schedule Builder');
+  mainWindow.setTitle(appTitle());
   return true;
 });
 
