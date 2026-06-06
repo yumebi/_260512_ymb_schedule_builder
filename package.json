@@ -10,11 +10,8 @@
     "start": "electron .",
     "dev": "electron .",
     "build": "electron-builder",
-    "prebuild:win": "node scripts/bump-version.js",
     "build:win": "electron-builder --win",
-    "prebuild:mac": "node scripts/bump-version.js",
     "build:mac": "electron-builder --mac",
-    "prebuild:all": "node scripts/bump-version.js",
     "build:all": "electron-builder -mw"
   },
   "devDependencies": {
