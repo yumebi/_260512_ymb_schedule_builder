@@ -1,4 +1,4 @@
-# schedule_builder
+# YMB Schedule Builder
 
 ガントチャート式スケジュール作成アプリ（Windows / macOS 対応デスクトップアプリ）
 
@@ -19,6 +19,7 @@
 - **担当マスタ管理** — 担当者を自由に追加・編集・削除
 - **工程カラー設定** — プリセット18色 + OS ネイティブカラーピッカーで色指定
 - **Excel 出力（横方向 / 縦方向）** — 日付軸を列 or 行に展開した2種類のレイアウトで出力
+- **最近使ったファイル** — 直近8件を記録してメニューからすぐに開ける
 - **自動保存** — 編集内容を自動保存し、次回起動時に前回のデータを復元
 - **ドラッグ＆ドロップ** — 工程の並び順をドラッグで変更
 
@@ -32,15 +33,15 @@
 
 | ファイル | 説明 |
 |---|---|
-| `schedule_builder Setup x.x.x.exe` | インストーラ版（スタートメニュー登録） |
-| `schedule_builder x.x.x.exe` | ポータブル版（インストール不要） |
+| `YMB Schedule Builder Setup x.x.x.exe` | インストーラ版（スタートメニュー登録） |
+| `YMB Schedule Builder x.x.x.exe` | ポータブル版（インストール不要） |
 
 ### macOS
 
 | ファイル | 説明 |
 |---|---|
-| `schedule_builder-x.x.x.dmg` | Intel Mac 用（x64） |
-| `schedule_builder-x.x.x-arm64.dmg` | Apple Silicon 用（M1 / M2 / M3） |
+| `YMB Schedule Builder-x.x.x.dmg` | Intel Mac 用（x64） |
+| `YMB Schedule Builder-x.x.x-arm64.dmg` | Apple Silicon 用（M1 / M2 / M3） |
 
 > macOS では初回起動時に「開発元が未確認」と表示される場合があります。  
 > Finder でファイルを右クリック →「開く」を選択してください。
@@ -74,20 +75,20 @@ npm start
 
 ## ビルド
 
+ビルドを実行するたびにパッチバージョン（x.y.**Z**）が自動でインクリメントされます。
+
 ### Windows
 
 > インストーラのビルドには **開発者モード** または **管理者権限** が必要です。  
 > 設定 → プライバシーとセキュリティ → 開発者向け → 開発者モード を ON にしてください。
 
 ```powershell
-# Windows 向けビルド（インストーラ・ポータブル・7z）
 npm run build:win
 ```
 
 ### macOS
 
 ```bash
-# macOS 向けビルド（dmg・zip）
 npm run build:mac
 ```
 

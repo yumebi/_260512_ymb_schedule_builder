@@ -848,7 +848,7 @@
           body.style.textAlign = 'center';
           body.style.lineHeight = '2';
           body.innerHTML = `
-            <div style="font-size:18px;font-weight:bold;margin-bottom:4px;">schedule_builder</div>
+            <div style="font-size:18px;font-weight:bold;margin-bottom:4px;">YMB Schedule Builder</div>
             <div style="font-size:13px;color:#64748b;margin-bottom:16px;">v${ver}</div>
             <div style="font-size:14px;">author : ymb</div>`;
           openModal('このアプリについて', body, () => {});

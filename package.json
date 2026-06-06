@@ -1,7 +1,7 @@
 {
   "name": "schedule_builder",
   "version": "2.0.0",
-  "description": "ガントチャート式スケジュール作成アプリ",
+  "description": "YMB Schedule Builder — ガントチャート式スケジュール作成アプリ",
   "main": "main.js",
   "author": "",
   "license": "UNLICENSED",
@@ -10,8 +10,11 @@
     "start": "electron .",
     "dev": "electron .",
     "build": "electron-builder",
+    "prebuild:win": "node scripts/bump-version.js",
     "build:win": "electron-builder --win",
+    "prebuild:mac": "node scripts/bump-version.js",
     "build:mac": "electron-builder --mac",
+    "prebuild:all": "node scripts/bump-version.js",
     "build:all": "electron-builder -mw"
   },
   "devDependencies": {
@@ -22,8 +25,8 @@
     "exceljs": "^4.4.0"
   },
   "build": {
-    "appId": "jp.local.schedule_builder",
-    "productName": "schedule_builder",
+    "appId": "jp.local.ymb_schedule_builder",
+    "productName": "YMB Schedule Builder",
     "directories": {
       "output": "dist"
     },
