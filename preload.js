@@ -6,7 +6,6 @@ contextBridge.exposeInMainWorld('api', {
   saveProject: (data) => ipcRenderer.invoke('project:save', data),
   saveProjectAs: (data) => ipcRenderer.invoke('project:saveAs', data),
   exportExcel: (data, orientation) => ipcRenderer.invoke('project:exportExcel', data, orientation),
-  exportPDF: (data) => ipcRenderer.invoke('project:exportPDF', data),
   fetchHolidays: (opts) => ipcRenderer.invoke('holidays:fetch', opts || {}),
   loadLastState: () => ipcRenderer.invoke('state:loadLast'),
   saveLastState: (data) => ipcRenderer.invoke('state:saveLast', data),

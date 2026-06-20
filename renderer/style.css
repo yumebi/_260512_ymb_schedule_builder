@@ -328,27 +328,6 @@ button.icon { padding: 4px 8px; }
 .assignee-row input[type="text"] { flex: 1; }
 .add-row { margin-top: 8px; }
 
-#pdf-print-root { display: none; }
-body.pdf-export-mode .container { display: none; }
-body.pdf-export-mode #pdf-print-root {
-  display: block; background: #ffffff; color: #1e293b; padding: 16px;
-}
-
-.print-table { border-collapse: collapse; width: 100%; font-size: 10px; table-layout: fixed; }
-.print-table td {
-  border: 1px solid #bfbfbf; padding: 2px 4px; text-align: center;
-  white-space: nowrap; overflow: hidden; color: #1e293b;
-}
-.print-title { font-size: 16px; font-weight: bold; text-align: center; background: #ffffff; padding: 8px; }
-.print-header { background: #efefef; font-weight: bold; }
-.print-month { background: #e2e8f0; font-weight: bold; }
-.print-cell-left { text-align: left; }
-.print-cell-center { text-align: center; }
-.print-note {
-  margin-top: 12px; font-size: 11px; white-space: pre-wrap;
-  border: 1px solid #cccccc; padding: 8px; min-height: 60px;
-}
-
 .hint-text { margin-bottom: 14px; font-size: 14px; }
 .inline-label-row { display: flex; align-items: center; gap: 10px; }
 .inline-label-row span { white-space: nowrap; }

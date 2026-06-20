@@ -147,7 +147,6 @@ async function buildMenu() {
         { label: '名前を付けて保存...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenu('saveAs') },
         { type: 'separator' },
         { label: 'Excel出力...', accelerator: 'CmdOrCtrl+E', click: () => sendMenu('exportExcel') },
-        { label: 'PDF出力...', accelerator: 'CmdOrCtrl+Shift+P', click: () => sendMenu('exportPDF') },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit', label: '終了' },
       ],
@@ -307,28 +306,6 @@ ipcMain.handle('holidays:fetch', async (_e, opts) => {
     return { ok: true, list };
   } catch (e) {
     return { ok: false, error: String(e.message || e) };
-  }
-});
-
-ipcMain.handle('project:exportPDF', async (_e, data) => {
-  const defaultName = (data.projectName || 'schedule') + '.pdf';
-  const result = await dialog.showSaveDialog(mainWindow, {
-    title: 'PDFとして出力',
-    defaultPath: defaultName,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
-  });
-  if (result.canceled || !result.filePath) return null;
-  try {
-    const pdfBuffer = await mainWindow.webContents.printToPDF({
-      landscape: true,
-      printBackground: true,
-      pageSize: 'A4',
-    });
-    await fs.writeFile(result.filePath, pdfBuffer);
-    return { filePath: result.filePath };
-  } catch (e) {
-    dialog.showErrorBox('PDF出力エラー', String(e.message || e));
-    return null;
   }
 });
 
@@ -573,7 +550,7 @@ async function writeExcelHorizontal(filePath, data) {
 
   if (data.note) {
     const noteRow = taskRowStart + tasks.length + 1;
-    ws.mergeCells(noteRow, 1, noteRow, 3);
+    ws.mergeCells(noteRow, 1, noteRow, 6);
     const c = ws.getCell(noteRow, 1);
     c.value = data.note;
     c.alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
@@ -811,7 +788,8 @@ async function writeExcelVertical(filePath, data) {
   // 備考
   if (data.note) {
     const noteRow = dateRowStart + dates.length + 1;
-    ws.mergeCells(noteRow, 1, noteRow, 3);
+    const noteColEnd = Math.max(3, taskColStart + tasks.length - 1);
+    ws.mergeCells(noteRow, 1, noteRow, noteColEnd);
     const c = ws.getCell(noteRow, 1);
     c.value = data.note;
     c.alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
