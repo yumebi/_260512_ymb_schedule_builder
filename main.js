@@ -1,6 +1,7 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const ExcelJS = require('exceljs');
 
 let mainWindow = null;
@@ -47,10 +48,54 @@ async function openRecentFile(filePath) {
   }
 }
 
+// ---------- ウィンドウ位置・サイズの保存/復元 ----------
+const WINDOW_STATE_MIN_VISIBLE = 80; // px。この値以上画面に重なっていれば「見える」とみなす
+
+function windowStatePath() {
+  return path.join(app.getPath('userData'), 'windowState.json');
+}
+
+async function loadWindowState() {
+  try {
+    const text = await fs.readFile(windowStatePath(), 'utf-8');
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function isBoundsUsable(bounds) {
+  if (!bounds || typeof bounds.x !== 'number' || typeof bounds.y !== 'number') return false;
+  if (!bounds.width || !bounds.height) return false;
+  return screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    const overlapX = Math.min(bounds.x + bounds.width, a.x + a.width) - Math.max(bounds.x, a.x);
+    const overlapY = Math.min(bounds.y + bounds.height, a.y + a.height) - Math.max(bounds.y, a.y);
+    return overlapX >= WINDOW_STATE_MIN_VISIBLE && overlapY >= WINDOW_STATE_MIN_VISIBLE;
+  });
+}
+
+function saveWindowStateSync() {
+  if (!mainWindow) return;
+  try {
+    const isMaximized = mainWindow.isMaximized();
+    const bounds = isMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+    fsSync.writeFileSync(windowStatePath(), JSON.stringify({ ...bounds, isMaximized }), 'utf-8');
+  } catch {}
+}
+
 async function createWindow() {
+  const saved = await loadWindowState();
+  const windowOpts = { width: 1400, height: 900 };
+  if (saved && isBoundsUsable(saved)) {
+    windowOpts.x = saved.x;
+    windowOpts.y = saved.y;
+    windowOpts.width = saved.width;
+    windowOpts.height = saved.height;
+  }
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    ...windowOpts,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -59,7 +104,11 @@ async function createWindow() {
     title: appTitle(),
     icon: path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
   });
+  if (saved && saved.isMaximized && isBoundsUsable(saved)) {
+    mainWindow.maximize();
+  }
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.on('close', saveWindowStateSync);
   await buildMenu();
 }
 
@@ -98,6 +147,7 @@ async function buildMenu() {
         { label: '名前を付けて保存...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenu('saveAs') },
         { type: 'separator' },
         { label: 'Excel出力...', accelerator: 'CmdOrCtrl+E', click: () => sendMenu('exportExcel') },
+        { label: 'PDF出力...', accelerator: 'CmdOrCtrl+Shift+P', click: () => sendMenu('exportPDF') },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit', label: '終了' },
       ],
@@ -105,8 +155,8 @@ async function buildMenu() {
     {
       label: '編集',
       submenu: [
-        { role: 'undo', label: '元に戻す' },
-        { role: 'redo', label: 'やり直し' },
+        { label: '元に戻す', accelerator: 'CmdOrCtrl+Z', click: () => sendMenu('undo') },
+        { label: 'やり直し', accelerator: 'CmdOrCtrl+Y', click: () => sendMenu('redo') },
         { type: 'separator' },
         { role: 'cut', label: '切り取り' },
         { role: 'copy', label: 'コピー' },
@@ -122,6 +172,8 @@ async function buildMenu() {
         { role: 'resetZoom', label: 'ズームリセット' },
         { role: 'zoomIn', label: 'ズームイン' },
         { role: 'zoomOut', label: 'ズームアウト' },
+        { type: 'separator' },
+        { label: 'ダークモード切替', accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('toggle-theme') },
       ],
     },
     {
@@ -258,6 +310,28 @@ ipcMain.handle('holidays:fetch', async (_e, opts) => {
   }
 });
 
+ipcMain.handle('project:exportPDF', async (_e, data) => {
+  const defaultName = (data.projectName || 'schedule') + '.pdf';
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'PDFとして出力',
+    defaultPath: defaultName,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  try {
+    const pdfBuffer = await mainWindow.webContents.printToPDF({
+      landscape: true,
+      printBackground: true,
+      pageSize: 'A4',
+    });
+    await fs.writeFile(result.filePath, pdfBuffer);
+    return { filePath: result.filePath };
+  } catch (e) {
+    dialog.showErrorBox('PDF出力エラー', String(e.message || e));
+    return null;
+  }
+});
+
 ipcMain.handle('project:exportExcel', async (_e, data, orientation) => {
   const defaultName = (data.projectName || 'schedule') + '.xlsx';
   const result = await dialog.showSaveDialog(mainWindow, {
@@ -298,11 +372,12 @@ async function writeExcelHorizontal(filePath, data) {
   wb.creator = 'YMB Schedule Builder';
   wb.created = new Date();
   const ws = wb.addWorksheet('schedule', {
-    views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }],
+    views: [{ state: 'frozen', xSplit: 4, ySplit: 4 }],
   });
 
   const tasks = data.tasks || [];
   const holidays = new Set(data.holidays || []);
+  const milestones = new Set((data.milestones || []).map((m) => m.date));
   const assignees = data.assignees || [];
   const findAssignee = (id) => assignees.find((a) => a.id === id);
 
@@ -337,8 +412,9 @@ async function writeExcelHorizontal(filePath, data) {
   const WEEKEND_SUN_ARGB = 'FFFCE4E4';
   const HEADER_ARGB = 'FFEFEFEF';
   const MONTH_ARGB = 'FFE2E8F0';
+  const MILESTONE_BORDER = { style: 'thick', color: { argb: 'FFF59E0B' } };
 
-  const dateColStart = 4; // D列
+  const dateColStart = 5; // E列
   const totalCols = dateColStart - 1 + dates.length;
 
   const headerBorder = {
@@ -356,14 +432,16 @@ async function writeExcelHorizontal(filePath, data) {
   titleCell.font = { bold: true, size: 14 };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-  // 左 3 列 (A〜C) を行 2〜4 で縦結合し、ヘッダラベルを表示
+  // 左 4 列 (A〜D) を行 2〜4 で縦結合し、ヘッダラベルを表示
   ws.mergeCells(2, 1, 4, 1);
   ws.mergeCells(2, 2, 4, 2);
   ws.mergeCells(2, 3, 4, 3);
+  ws.mergeCells(2, 4, 4, 4);
   const leftHeaders = [
     { addr: 'A2', label: '作業項目' },
     { addr: 'B2', label: '担当' },
     { addr: 'C2', label: '営業日' },
+    { addr: 'D2', label: '進捗' },
   ];
   leftHeaders.forEach(({ addr, label }) => {
     const c = ws.getCell(addr);
@@ -430,6 +508,10 @@ async function writeExcelHorizontal(filePath, data) {
     wkCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgArgb } };
     dateCell.font = { size: 10, bold: true, ...(fontColor ? { color: { argb: fontColor } } : {}) };
     wkCell.font = { size: 10, bold: true, ...(fontColor ? { color: { argb: fontColor } } : {}) };
+    if (milestones.has(iso)) {
+      dateCell.border = { ...headerBorder, top: MILESTONE_BORDER };
+      wkCell.border = { ...headerBorder, top: MILESTONE_BORDER };
+    }
   });
 
   // Row 5+: 工程行
@@ -440,10 +522,12 @@ async function writeExcelHorizontal(filePath, data) {
     ws.getCell(r, 1).value = t.name;
     ws.getCell(r, 2).value = assignee ? assignee.label : '';
     ws.getCell(r, 3).value = t.days;
+    ws.getCell(r, 4).value = `${t.progress || 0}%`;
     ws.getCell(r, 1).alignment = { vertical: 'middle' };
     ws.getCell(r, 2).alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getCell(r, 3).alignment = { horizontal: 'center', vertical: 'middle' };
-    for (let i = 1; i <= 3; i++) ws.getCell(r, i).border = headerBorder;
+    ws.getCell(r, 4).alignment = { horizontal: 'center', vertical: 'middle' };
+    for (let i = 1; i <= 4; i++) ws.getCell(r, i).border = headerBorder;
 
     const taskStart = parseLocalDate(t.start);
     const taskEnd = parseLocalDate(t.end);
@@ -477,6 +561,7 @@ async function writeExcelHorizontal(filePath, data) {
   ws.getColumn(1).width = 26;
   ws.getColumn(2).width = 20;
   ws.getColumn(3).width = 8;
+  ws.getColumn(4).width = 8;
   for (let i = 0; i < dates.length; i++) ws.getColumn(dateColStart + i).width = 3.6;
 
   // 行高
@@ -510,11 +595,12 @@ async function writeExcelVertical(filePath, data) {
   wb.creator = 'YMB Schedule Builder';
   wb.created = new Date();
   const ws = wb.addWorksheet('schedule', {
-    views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }],
+    views: [{ state: 'frozen', xSplit: 3, ySplit: 5 }],
   });
 
   const tasks = data.tasks || [];
   const holidays = new Set(data.holidays || []);
+  const milestones = new Set((data.milestones || []).map((m) => m.date));
   const assignees = data.assignees || [];
   const findAssignee = (id) => assignees.find((a) => a.id === id);
 
@@ -549,10 +635,11 @@ async function writeExcelVertical(filePath, data) {
   const WEEKEND_SUN_ARGB = 'FFFCE4E4';
   const HEADER_ARGB = 'FFEFEFEF';
   const MONTH_ARGB = 'FFE2E8F0';
+  const MILESTONE_BORDER = { style: 'thick', color: { argb: 'FFF59E0B' } };
 
   const taskColStart = 4; // D列からタスク
   const totalCols = taskColStart - 1 + tasks.length;
-  const dateRowStart = 5; // Row 5 から日付行
+  const dateRowStart = 6; // Row 6 から日付行
 
   const headerBorder = {
     top: { style: 'thin', color: { argb: 'FFBFBFBF' } },
@@ -569,10 +656,10 @@ async function writeExcelVertical(filePath, data) {
   titleCell.font = { bold: true, size: 14 };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-  // 左 3 列 (A〜C) を行 2〜4 で縦結合し、日付軸ヘッダラベルを表示
-  ws.mergeCells(2, 1, 4, 1);
-  ws.mergeCells(2, 2, 4, 2);
-  ws.mergeCells(2, 3, 4, 3);
+  // 左 3 列 (A〜C) を行 2〜5 で縦結合し、日付軸ヘッダラベルを表示
+  ws.mergeCells(2, 1, 5, 1);
+  ws.mergeCells(2, 2, 5, 2);
+  ws.mergeCells(2, 3, 5, 3);
   [
     { col: 1, label: '年月' },
     { col: 2, label: '日付' },
@@ -586,7 +673,7 @@ async function writeExcelVertical(filePath, data) {
     c.border = headerBorder;
   });
 
-  // Row 2: 工程名 / Row 3: 担当 / Row 4: 営業日数 (タスク列)
+  // Row 2: 工程名 / Row 3: 担当 / Row 4: 営業日数 / Row 5: 進捗 (タスク列)
   tasks.forEach((t, ti) => {
     const col = taskColStart + ti;
     const assignee = findAssignee(t.assigneeId);
@@ -612,6 +699,13 @@ async function writeExcelVertical(filePath, data) {
     daysCell.alignment = { horizontal: 'center', vertical: 'middle' };
     daysCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_ARGB } };
     daysCell.border = headerBorder;
+
+    const progressCell = ws.getCell(5, col);
+    progressCell.value = `${t.progress || 0}%`;
+    progressCell.font = { size: 10 };
+    progressCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    progressCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_ARGB } };
+    progressCell.border = headerBorder;
   });
 
   // Row 5+: 日付行
@@ -667,6 +761,10 @@ async function writeExcelVertical(filePath, data) {
     wkCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgArgb } };
     dateCell.font = { size: 10, bold: true, ...(fontColor ? { color: { argb: fontColor } } : {}) };
     wkCell.font = { size: 10, bold: true, ...(fontColor ? { color: { argb: fontColor } } : {}) };
+    if (milestones.has(iso)) {
+      dateCell.border = { ...headerBorder, left: MILESTONE_BORDER };
+      wkCell.border = { ...headerBorder, left: MILESTONE_BORDER };
+    }
 
     // 工程セル (Col D+)
     tasks.forEach((t, ti) => {
@@ -707,6 +805,7 @@ async function writeExcelVertical(filePath, data) {
   ws.getRow(2).height = 36; // 工程名
   ws.getRow(3).height = 20; // 担当
   ws.getRow(4).height = 20; // 営業日
+  ws.getRow(5).height = 20; // 進捗
   for (let i = 0; i < dates.length; i++) ws.getRow(dateRowStart + i).height = 18;
 
   // 備考

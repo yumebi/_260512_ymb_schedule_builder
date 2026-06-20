@@ -3,6 +3,19 @@
 
   const WEEK_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
+  function applyTheme(theme) {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    try { localStorage.setItem('theme', theme); } catch {}
+  }
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    applyTheme(cur === 'dark' ? 'light' : 'dark');
+  }
+
   const PRESET_COLORS = [
     '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
     '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
@@ -103,11 +116,53 @@
     holidays: [],
     assignees: [],
     tasks: [],
+    milestones: [],
   });
 
   let state = EMPTY_STATE();
   let suppressAutoSave = true;
   let autoSaveTimer = null;
+
+  // ---------- undo / redo ----------
+  let historyUndo = [];
+  let historyRedo = [];
+  const HISTORY_MAX = 50;
+  function snapshotState() {
+    return JSON.parse(JSON.stringify(state));
+  }
+  function pushHistory(beforeState) {
+    if (!beforeState) return;
+    historyUndo.push(beforeState);
+    if (historyUndo.length > HISTORY_MAX) historyUndo.shift();
+    historyRedo.length = 0;
+  }
+  function undo() {
+    if (historyUndo.length === 0) return;
+    historyRedo.push(snapshotState());
+    state = historyUndo.pop();
+    render();
+  }
+  function redo() {
+    if (historyRedo.length === 0) return;
+    historyUndo.push(snapshotState());
+    state = historyRedo.pop();
+    render();
+  }
+  function wireUndoableText(el) {
+    let before = null;
+    el.addEventListener('focus', () => { before = snapshotState(); });
+    el.addEventListener('blur', () => {
+      if (before && JSON.stringify(before) !== JSON.stringify(state)) {
+        pushHistory(before);
+      }
+      before = null;
+    });
+  }
+
+  // ---------- ガント表示設定(非永続) ----------
+  const ZOOM_WIDTH = { day: 38, week: 14, month: 5 };
+  let ganttZoom = 'day';
+  let assigneeFilterId = '';
 
   function scheduleAutoSave() {
     if (suppressAutoSave) return;
@@ -203,6 +258,21 @@
     const t = state.tasks[idx];
     if (!t) return;
     const holSet = holidaySet();
+    if (field === 'name') {
+      t.name = value;
+      const leftRows = document.querySelectorAll('#left-task-list .row-item');
+      const lr = leftRows[idx];
+      if (lr) {
+        const cellName = lr.querySelector('.cell-name');
+        if (cellName) {
+          cellName.textContent = value;
+          cellName.title = value;
+        }
+      }
+      scheduleAutoSave();
+      return;
+    }
+    const before = snapshotState();
     if (field === 'days') {
       t.days = Math.max(1, parseInt(value, 10) || 1);
       t.end = formatDate(calcEndDate(parseLocalDate(t.start), t.days, holSet));
@@ -216,21 +286,11 @@
       t.assigneeId = value;
       const a = state.assignees.find((x) => x.id === value);
       if (a && !t.color) t.color = a.color;
-    } else if (field === 'name') {
-      t.name = value;
-      const leftRows = document.querySelectorAll('#left-task-list .row-item');
-      const lr = leftRows[idx];
-      if (lr) {
-        const cellName = lr.querySelector('.cell-name');
-        if (cellName) {
-          cellName.textContent = value;
-          cellName.title = value;
-        }
-      }
-      scheduleAutoSave();
-      return;
+    } else if (field === 'progress') {
+      t.progress = Math.max(0, Math.min(100, parseInt(value, 10) || 0));
     } else if (field === 'color') {
       t.color = value;
+      pushHistory(before);
       const chartRows = document.querySelectorAll('#chart-body .chart-row');
       if (chartRows[idx]) {
         const bar = chartRows[idx].querySelector('.gantt-bar');
@@ -239,9 +299,11 @@
       scheduleAutoSave();
       return;
     }
+    pushHistory(before);
     render();
   }
   function addTask() {
+    const before = snapshotState();
     const last = state.tasks[state.tasks.length - 1];
     const holSet = holidaySet();
     let startDate;
@@ -263,17 +325,23 @@
       start: formatDate(startDate),
       end: formatDate(end),
       color,
+      progress: 0,
     });
+    pushHistory(before);
     render();
   }
   function removeTask(idx) {
+    const before = snapshotState();
     state.tasks.splice(idx, 1);
+    pushHistory(before);
     render();
   }
   function moveTask(idx, delta) {
     const j = idx + delta;
     if (j < 0 || j >= state.tasks.length) return;
+    const before = snapshotState();
     [state.tasks[idx], state.tasks[j]] = [state.tasks[j], state.tasks[idx]];
+    pushHistory(before);
     render();
   }
 
@@ -283,6 +351,7 @@
   function render() {
     document.querySelectorAll('.color-popover').forEach((p) => p.remove());
     ensureTaskDates();
+    renderAssigneeFilterOptions();
     renderTaskTable();
     renderGantt();
     renderStatus();
@@ -291,6 +360,20 @@
     $('#input-target-date').value = state.targetDate || '';
     $('#project-note').value = state.note || '';
     scheduleAutoSave();
+  }
+
+  function renderAssigneeFilterOptions() {
+    const sel = $('#assignee-filter');
+    if (!sel) return;
+    const prev = assigneeFilterId;
+    sel.innerHTML = '<option value="">全員</option>' +
+      state.assignees.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.label)}</option>`).join('');
+    if (state.assignees.some((a) => a.id === prev)) {
+      sel.value = prev;
+    } else {
+      assigneeFilterId = '';
+      sel.value = '';
+    }
   }
 
   function escapeHtml(s) {
@@ -306,6 +389,7 @@
     const tbody = $('#task-body');
     tbody.innerHTML = '';
     state.tasks.forEach((t, i) => {
+      if (assigneeFilterId && t.assigneeId !== assigneeFilterId) return;
       const tr = document.createElement('tr');
       tr.dataset.index = i;
       const assigneeOptions = state.assignees
@@ -318,6 +402,7 @@
         <td><input type="number" min="1" data-field="days" value="${t.days}"></td>
         <td><input type="date" data-field="start" value="${escapeHtml(t.start)}"></td>
         <td><input type="date" data-field="end" value="${escapeHtml(t.end)}"></td>
+        <td><input type="number" min="0" max="100" data-field="progress" value="${t.progress || 0}"></td>
         <td class="color-cell"></td>
         <td>
           <button class="icon" data-action="up" title="上へ">↑</button>
@@ -337,6 +422,7 @@
         const field = el.dataset.field;
         const eventName = el.tagName === 'INPUT' && el.type === 'text' ? 'input' : 'change';
         el.addEventListener(eventName, (e) => updateTaskField(idx, field, e.target.value));
+        if (field === 'name') wireUndoableText(el);
       });
     });
     tbody.querySelectorAll('button').forEach((btn) => {
@@ -382,12 +468,80 @@
           dragIdx = null;
           return;
         }
+        const before = snapshotState();
         const [moved] = state.tasks.splice(dragIdx, 1);
         state.tasks.splice(dropIdx, 0, moved);
+        pushHistory(before);
         dragIdx = null;
         render();
       });
     });
+  }
+
+  function attachBarInteractions(bar, idx, chartStart, dayWidth) {
+    const leftHandle = document.createElement('div');
+    leftHandle.className = 'gantt-bar-handle left';
+    const rightHandle = document.createElement('div');
+    rightHandle.className = 'gantt-bar-handle right';
+
+    function startDrag(mode, e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = state.tasks[idx];
+      const before = snapshotState();
+      const origStart = parseLocalDate(t.start);
+      const origEnd = parseLocalDate(t.end);
+      const startX = e.clientX;
+      let changed = false;
+      let pendingStart = origStart;
+      let pendingEnd = origEnd;
+      const onMove = (ev) => {
+        const dayDelta = Math.round((ev.clientX - startX) / dayWidth);
+        let newStart = new Date(origStart);
+        let newEnd = new Date(origEnd);
+        if (mode === 'move') {
+          newStart.setDate(newStart.getDate() + dayDelta);
+          newEnd.setDate(newEnd.getDate() + dayDelta);
+        } else if (mode === 'left') {
+          newStart.setDate(newStart.getDate() + dayDelta);
+          if (newStart > newEnd) newStart = new Date(newEnd);
+        } else {
+          newEnd.setDate(newEnd.getDate() + dayDelta);
+          if (newEnd < newStart) newEnd = new Date(newStart);
+        }
+        const barLeft = Math.round((newStart - chartStart) / 86400000) * dayWidth + 2;
+        const span = Math.round((newEnd - newStart) / 86400000) + 1;
+        const barWidth = Math.max(span * dayWidth - 4, 6);
+        bar.style.left = `${barLeft}px`;
+        bar.style.width = `${barWidth}px`;
+        pendingStart = newStart;
+        pendingEnd = newEnd;
+        changed = dayDelta !== 0;
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        if (changed) {
+          const holSet = holidaySet();
+          t.start = formatDate(pendingStart);
+          t.end = formatDate(pendingEnd);
+          t.days = calcBusinessDays(parseLocalDate(t.start), parseLocalDate(t.end), holSet);
+          pushHistory(before);
+        }
+        render();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
+    leftHandle.addEventListener('mousedown', (e) => startDrag('left', e));
+    rightHandle.addEventListener('mousedown', (e) => startDrag('right', e));
+    bar.addEventListener('mousedown', (e) => {
+      if (e.target === leftHandle || e.target === rightHandle) return;
+      startDrag('move', e);
+    });
+    bar.appendChild(leftHandle);
+    bar.appendChild(rightHandle);
   }
 
   function renderGantt() {
@@ -416,9 +570,11 @@
     calendarEnd.setDate(calendarEnd.getDate() + 7);
 
     const totalDays = Math.round((calendarEnd - chartStart) / 86400000);
-    const dayWidth = 38;
+    const dayWidth = ZOOM_WIDTH[ganttZoom] || ZOOM_WIDTH.day;
     const totalChartWidth = (totalDays + 1) * dayWidth;
     const holSet = holidaySet();
+    const milestoneSet = new Set((state.milestones || []).map((m) => m.date));
+    const milestoneLabel = new Map((state.milestones || []).map((m) => [m.date, m.label || '']));
 
     const dayInfos = [];
     const monthCounts = {};
@@ -428,15 +584,24 @@
       const iso = formatDate(d);
       const dn = d.getDay();
       const isHol = holSet.has(iso);
-      dayInfos.push({ date: d, iso, dn, isHol });
+      const isMilestone = milestoneSet.has(iso);
+      dayInfos.push({ date: d, iso, dn, isHol, isMilestone });
       const key = `${d.getFullYear()}年 ${d.getMonth() + 1}月`;
       monthCounts[key] = (monthCounts[key] || 0) + 1;
 
       const cell = document.createElement('div');
       cell.className =
-        'day-cell ' + (isHol ? 'holiday' : dn === 6 ? 'weekend-sat' : dn === 0 ? 'weekend-sun' : '');
+        'day-cell ' + (isHol ? 'holiday' : dn === 6 ? 'weekend-sat' : dn === 0 ? 'weekend-sun' : '') +
+        (isMilestone ? ' milestone-day' : '');
       cell.style.width = `${dayWidth}px`;
-      cell.innerHTML = `<span>${d.getDate()}</span><span style="font-weight:bold;">${WEEK_LABELS[dn]}</span>`;
+      if (isMilestone) cell.title = milestoneLabel.get(iso) || 'マイルストーン';
+      if (ganttZoom === 'month') {
+        cell.innerHTML = '';
+      } else if (ganttZoom === 'week') {
+        cell.innerHTML = `<span>${d.getDate()}</span>`;
+      } else {
+        cell.innerHTML = `<span>${d.getDate()}</span><span class="day-cell-week">${WEEK_LABELS[dn]}</span>`;
+      }
       dayRow.appendChild(cell);
     }
     Object.keys(monthCounts).forEach((m) => {
@@ -448,6 +613,7 @@
     });
 
     state.tasks.forEach((t, idx) => {
+      if (assigneeFilterId && t.assigneeId !== assigneeFilterId) return;
       const a = state.assignees.find((x) => x.id === t.assigneeId);
 
       const lRow = document.createElement('div');
@@ -469,6 +635,12 @@
           bg.style.width = `${dayWidth}px`;
           cRow.appendChild(bg);
         }
+        if (info.isMilestone) {
+          const marker = document.createElement('div');
+          marker.className = 'milestone-marker';
+          marker.style.left = `${i * dayWidth}px`;
+          cRow.appendChild(marker);
+        }
       });
       const ts = parseLocalDate(t.start);
       const te = parseLocalDate(t.end);
@@ -481,6 +653,13 @@
       bar.style.width = `${barWidth}px`;
       bar.style.background = t.color || '#666';
       bar.textContent = `${t.days}d`;
+      if (t.progress) {
+        const fill = document.createElement('div');
+        fill.className = 'gantt-bar-progress';
+        fill.style.width = `${Math.min(100, t.progress)}%`;
+        bar.appendChild(fill);
+      }
+      attachBarInteractions(bar, idx, chartStart, dayWidth);
       cRow.appendChild(bar);
       chartBody.appendChild(cRow);
     });
@@ -503,6 +682,263 @@
     const el = $('#status-area');
     el.textContent = label;
     el.className = over ? 'over' : 'ok';
+  }
+
+  // ---------- 印刷用テーブル(Excel互換レイアウト) ----------
+  function computePrintRange() {
+    const tasks = state.tasks;
+    let minStart = parseLocalDate(tasks[0].start);
+    let maxEnd = parseLocalDate(tasks[0].end);
+    tasks.forEach((t) => {
+      const s = parseLocalDate(t.start);
+      const e = parseLocalDate(t.end);
+      if (s < minStart) minStart = s;
+      if (e > maxEnd) maxEnd = e;
+    });
+    if (state.targetDate) {
+      const dl = parseLocalDate(state.targetDate);
+      if (dl && dl > maxEnd) maxEnd = dl;
+    }
+    const dates = [];
+    const cur = new Date(minStart);
+    while (cur <= maxEnd) {
+      dates.push(new Date(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+    return dates;
+  }
+
+  function applyPrintDateStyle(td, d, holSet, milestoneSet) {
+    const iso = formatDate(d);
+    const dn = d.getDay();
+    if (holSet.has(iso) || dn === 0) {
+      td.style.background = '#fce4e4';
+      td.style.color = '#e11d48';
+    } else if (dn === 6) {
+      td.style.background = '#e7eefa';
+      td.style.color = '#2563eb';
+    }
+    if (milestoneSet.has(iso)) td.style.borderTop = '3px solid #f59e0b';
+  }
+
+  function appendPrintNote(container) {
+    if (!state.note) return;
+    const noteDiv = document.createElement('div');
+    noteDiv.className = 'print-note';
+    noteDiv.textContent = state.note;
+    container.appendChild(noteDiv);
+  }
+
+  function buildHorizontalPrintTable(container) {
+    container.innerHTML = '';
+    if (state.tasks.length === 0) {
+      container.textContent = '工程がありません';
+      return;
+    }
+    const dates = computePrintRange();
+    const holSet = holidaySet();
+    const milestoneSet = new Set((state.milestones || []).map((m) => m.date));
+
+    const table = document.createElement('table');
+    table.className = 'print-table';
+
+    const trTitle = document.createElement('tr');
+    const tdTitle = document.createElement('td');
+    tdTitle.colSpan = 4 + dates.length;
+    tdTitle.className = 'print-title';
+    tdTitle.textContent = state.projectName || 'スケジュール';
+    trTitle.appendChild(tdTitle);
+    table.appendChild(trTitle);
+
+    const trHead = document.createElement('tr');
+    ['作業項目', '担当', '営業日', '進捗'].forEach((label) => {
+      const td = document.createElement('td');
+      td.rowSpan = 3;
+      td.className = 'print-header';
+      td.textContent = label;
+      trHead.appendChild(td);
+    });
+    let i = 0;
+    while (i < dates.length) {
+      const key = `${dates[i].getFullYear()}年 ${dates[i].getMonth() + 1}月`;
+      let span = 1;
+      while (i + span < dates.length && `${dates[i + span].getFullYear()}年 ${dates[i + span].getMonth() + 1}月` === key) span++;
+      const td = document.createElement('td');
+      td.colSpan = span;
+      td.className = 'print-month';
+      td.textContent = key;
+      trHead.appendChild(td);
+      i += span;
+    }
+    table.appendChild(trHead);
+
+    const trDate = document.createElement('tr');
+    dates.forEach((d) => {
+      const td = document.createElement('td');
+      td.textContent = d.getDate();
+      applyPrintDateStyle(td, d, holSet, milestoneSet);
+      trDate.appendChild(td);
+    });
+    table.appendChild(trDate);
+
+    const trWeek = document.createElement('tr');
+    dates.forEach((d) => {
+      const td = document.createElement('td');
+      td.textContent = WEEK_LABELS[d.getDay()];
+      applyPrintDateStyle(td, d, holSet, milestoneSet);
+      trWeek.appendChild(td);
+    });
+    table.appendChild(trWeek);
+
+    state.tasks.forEach((t) => {
+      const a = state.assignees.find((x) => x.id === t.assigneeId);
+      const tr = document.createElement('tr');
+      const tdName = document.createElement('td');
+      tdName.textContent = t.name;
+      tdName.className = 'print-cell-left';
+      const tdRole = document.createElement('td');
+      tdRole.textContent = a ? a.label : '';
+      tdRole.className = 'print-cell-center';
+      const tdDays = document.createElement('td');
+      tdDays.textContent = t.days;
+      tdDays.className = 'print-cell-center';
+      const tdProg = document.createElement('td');
+      tdProg.textContent = `${t.progress || 0}%`;
+      tdProg.className = 'print-cell-center';
+      tr.appendChild(tdName);
+      tr.appendChild(tdRole);
+      tr.appendChild(tdDays);
+      tr.appendChild(tdProg);
+      const ts = parseLocalDate(t.start);
+      const te = parseLocalDate(t.end);
+      dates.forEach((d) => {
+        const td = document.createElement('td');
+        const iso = formatDate(d);
+        const dn = d.getDay();
+        const inRange = d >= ts && d <= te;
+        if (holSet.has(iso) || dn === 0) td.style.background = '#fce4e4';
+        else if (dn === 6) td.style.background = '#e7eefa';
+        else if (inRange) td.style.background = t.color || '#888888';
+        if (milestoneSet.has(iso)) td.style.borderTop = '3px solid #f59e0b';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+
+    container.appendChild(table);
+    appendPrintNote(container);
+  }
+
+  function buildVerticalPrintTable(container) {
+    container.innerHTML = '';
+    if (state.tasks.length === 0) {
+      container.textContent = '工程がありません';
+      return;
+    }
+    const dates = computePrintRange();
+    const holSet = holidaySet();
+    const milestoneSet = new Set((state.milestones || []).map((m) => m.date));
+    const tasks = state.tasks;
+
+    const table = document.createElement('table');
+    table.className = 'print-table';
+
+    const trTitle = document.createElement('tr');
+    const tdTitle = document.createElement('td');
+    tdTitle.colSpan = 3 + tasks.length;
+    tdTitle.className = 'print-title';
+    tdTitle.textContent = state.projectName || 'スケジュール';
+    trTitle.appendChild(tdTitle);
+    table.appendChild(trTitle);
+
+    const trName = document.createElement('tr');
+    ['年月', '日付', '曜日'].forEach((label) => {
+      const td = document.createElement('td');
+      td.rowSpan = 4;
+      td.className = 'print-header';
+      td.textContent = label;
+      trName.appendChild(td);
+    });
+    tasks.forEach((t) => {
+      const td = document.createElement('td');
+      td.className = 'print-header';
+      td.textContent = t.name;
+      td.style.background = t.color || '#888888';
+      td.style.color = '#ffffff';
+      trName.appendChild(td);
+    });
+    table.appendChild(trName);
+
+    const trRole = document.createElement('tr');
+    tasks.forEach((t) => {
+      const a = state.assignees.find((x) => x.id === t.assigneeId);
+      const td = document.createElement('td');
+      td.className = 'print-header';
+      td.textContent = a ? a.label : '';
+      trRole.appendChild(td);
+    });
+    table.appendChild(trRole);
+
+    const trDays = document.createElement('tr');
+    tasks.forEach((t) => {
+      const td = document.createElement('td');
+      td.className = 'print-header';
+      td.textContent = t.days;
+      trDays.appendChild(td);
+    });
+    table.appendChild(trDays);
+
+    const trProgress = document.createElement('tr');
+    tasks.forEach((t) => {
+      const td = document.createElement('td');
+      td.className = 'print-header';
+      td.textContent = `${t.progress || 0}%`;
+      trProgress.appendChild(td);
+    });
+    table.appendChild(trProgress);
+
+    dates.forEach((d, idx) => {
+      const tr = document.createElement('tr');
+      const isMonthStart = idx === 0 ||
+        d.getMonth() !== dates[idx - 1].getMonth() ||
+        d.getFullYear() !== dates[idx - 1].getFullYear();
+      if (isMonthStart) {
+        let span = 1;
+        while (idx + span < dates.length &&
+          dates[idx + span].getMonth() === d.getMonth() &&
+          dates[idx + span].getFullYear() === d.getFullYear()) span++;
+        const td = document.createElement('td');
+        td.rowSpan = span;
+        td.className = 'print-month';
+        td.textContent = `${d.getFullYear()}年 ${d.getMonth() + 1}月`;
+        tr.appendChild(td);
+      }
+      const tdDate = document.createElement('td');
+      tdDate.textContent = d.getDate();
+      applyPrintDateStyle(tdDate, d, holSet, milestoneSet);
+      tr.appendChild(tdDate);
+      const tdWeek = document.createElement('td');
+      tdWeek.textContent = WEEK_LABELS[d.getDay()];
+      applyPrintDateStyle(tdWeek, d, holSet, milestoneSet);
+      tr.appendChild(tdWeek);
+
+      const iso = formatDate(d);
+      const dn = d.getDay();
+      tasks.forEach((t) => {
+        const td = document.createElement('td');
+        const ts = parseLocalDate(t.start);
+        const te = parseLocalDate(t.end);
+        const inRange = d >= ts && d <= te;
+        if (holSet.has(iso) || dn === 0) td.style.background = '#fce4e4';
+        else if (dn === 6) td.style.background = '#e7eefa';
+        else if (inRange) td.style.background = t.color || '#888888';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+
+    container.appendChild(table);
+    appendPrintNote(container);
   }
 
   // ---------- modal helpers ----------
@@ -546,21 +982,21 @@
     });
   }
 
-  function exportOrientationModal() {
+  function exportOrientationModal(title) {
     return new Promise((resolve) => {
       const body = document.createElement('div');
       body.style.padding = '12px 0';
       body.innerHTML = `
-        <div style="margin-bottom:14px;font-size:14px;">出力方向を選択してください。</div>
-        <label style="display:flex;align-items:center;gap:10px;">
-          <span style="white-space:nowrap;">出力方向:</span>
-          <select id="export-orient-select" style="flex:1;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+        <div class="hint-text">出力方向を選択してください。</div>
+        <label class="inline-label-row">
+          <span>出力方向:</span>
+          <select id="export-orient-select">
             <option value="horizontal">横方向（日付を列に展開）</option>
             <option value="vertical">縦方向（日付を行に展開）</option>
           </select>
         </label>`;
 
-      $('#modal-title').textContent = 'Excel出力';
+      $('#modal-title').textContent = title || 'Excel出力';
       const bodyEl = $('#modal-body');
       bodyEl.innerHTML = '';
       bodyEl.appendChild(body);
@@ -649,6 +1085,7 @@
     }
     repaint();
     openModal('担当マスタの編集', wrap, () => {
+      const before = snapshotState();
       const valid = draft.filter((a) => a.label && a.label.trim() !== '');
       valid.forEach((a) => {
         if (!a.id) a.id = 'a' + Date.now() + Math.floor(Math.random() * 1000);
@@ -660,6 +1097,7 @@
           t.assigneeId = valid[0] ? valid[0].id : '';
         }
       });
+      pushHistory(before);
       render();
     });
   }
@@ -671,12 +1109,12 @@
     const nowYear = new Date().getFullYear();
     fetchBar.innerHTML = `
       <label>取得範囲:
-        <input type="number" id="hol-year-from" value="${nowYear}" min="1955" max="2100" style="width:70px;">
+        <input type="number" id="hol-year-from" value="${nowYear}" min="1955" max="2100" class="year-range-input">
         〜
-        <input type="number" id="hol-year-to" value="${nowYear + 2}" min="1955" max="2100" style="width:70px;">
+        <input type="number" id="hol-year-to" value="${nowYear + 2}" min="1955" max="2100" class="year-range-input">
       </label>
       <button type="button" id="btn-fetch-holidays">日本の祝日を自動取得</button>
-      <span id="fetch-status" style="font-size:11px; color:#64748b;"></span>`;
+      <span id="fetch-status" class="fetch-status-text"></span>`;
     container.appendChild(fetchBar);
 
     const wrap = document.createElement('div');
@@ -694,7 +1132,7 @@
         row.className = 'holiday-row';
         row.innerHTML = `
           <input type="date" value="${escapeHtml(h.date)}">
-          <input type="text" value="${escapeHtml(h.label || '')}" placeholder="名称（任意）" style="flex:1;">
+          <input type="text" value="${escapeHtml(h.label || '')}" placeholder="名称（任意）" class="flex-1">
           <button class="icon danger" type="button">×</button>`;
         const [dateEl, labelEl, delBtn] = row.querySelectorAll('input, button');
         dateEl.addEventListener('change', (e) => (draft[i].date = e.target.value));
@@ -745,6 +1183,7 @@
     });
 
     openModal('祝日・休暇の編集', container, () => {
+      const before = snapshotState();
       const sorted = draft
         .filter((h) => h.date)
         .sort((a, b) => a.date.localeCompare(b.date));
@@ -754,6 +1193,50 @@
           t.end = formatDate(calcEndDate(parseLocalDate(t.start), t.days, holidaySet()));
         }
       });
+      pushHistory(before);
+      render();
+    });
+  }
+
+  function openMilestonesModal() {
+    const wrap = document.createElement('div');
+    wrap.className = 'holiday-list';
+    const draft = (state.milestones || []).map((m) => ({ ...m }));
+    function repaint() {
+      wrap.innerHTML = '';
+      draft.forEach((m, i) => {
+        const row = document.createElement('div');
+        row.className = 'holiday-row';
+        row.innerHTML = `
+          <input type="date" value="${escapeHtml(m.date)}">
+          <input type="text" value="${escapeHtml(m.label || '')}" placeholder="名称（任意）" class="flex-1">
+          <button class="icon danger" type="button">×</button>`;
+        const [dateEl, labelEl, delBtn] = row.querySelectorAll('input, button');
+        dateEl.addEventListener('change', (e) => (draft[i].date = e.target.value));
+        labelEl.addEventListener('change', (e) => (draft[i].label = e.target.value));
+        delBtn.addEventListener('click', () => {
+          draft.splice(i, 1);
+          repaint();
+        });
+        wrap.appendChild(row);
+      });
+      const add = document.createElement('div');
+      add.className = 'add-row';
+      add.innerHTML = `<button type="button">＋ マイルストーンを追加</button>`;
+      add.querySelector('button').addEventListener('click', () => {
+        draft.push({ date: state.startDate || formatDate(new Date()), label: '' });
+        repaint();
+      });
+      wrap.appendChild(add);
+    }
+    repaint();
+
+    openModal('マイルストーンの編集', wrap, () => {
+      const before = snapshotState();
+      state.milestones = draft
+        .filter((m) => m.date)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      pushHistory(before);
       render();
     });
   }
@@ -769,6 +1252,7 @@
       holidaysDetailed: state.holidays,
       assignees: state.assignees,
       tasks: state.tasks,
+      milestones: state.milestones,
     };
   }
   function loadFromData(data) {
@@ -788,45 +1272,74 @@
     }
     state.assignees = Array.isArray(data.assignees) ? data.assignees : [];
     state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    state.milestones = Array.isArray(data.milestones) ? data.milestones : [];
+    historyUndo = [];
+    historyRedo = [];
     render();
   }
 
   // ---------- wiring ----------
   function wire() {
+    wireUndoableText($('#project-name'));
     $('#project-name').addEventListener('input', (e) => {
       state.projectName = e.target.value;
       scheduleAutoSave();
     });
     $('#input-start-date').addEventListener('change', (e) => {
+      const before = snapshotState();
       state.startDate = e.target.value;
       recalcAll();
+      pushHistory(before);
       render();
     });
     $('#input-target-date').addEventListener('change', (e) => {
+      const before = snapshotState();
       state.targetDate = e.target.value;
+      pushHistory(before);
       render();
     });
+    wireUndoableText($('#project-note'));
     $('#project-note').addEventListener('input', (e) => {
       state.note = e.target.value;
       scheduleAutoSave();
     });
     $('#btn-reset-schedule').addEventListener('click', () => {
+      const before = snapshotState();
       recalcAll();
+      pushHistory(before);
       render();
     });
     $('#btn-add-task').addEventListener('click', addTask);
     $('#btn-open-assignees').addEventListener('click', openAssigneesModal);
     $('#btn-open-holidays').addEventListener('click', openHolidaysModal);
+    $('#btn-open-milestones').addEventListener('click', openMilestonesModal);
+    $('#gantt-zoom').addEventListener('change', (e) => {
+      ganttZoom = e.target.value;
+      renderGantt();
+    });
+    $('#assignee-filter').addEventListener('change', (e) => {
+      assigneeFilterId = e.target.value;
+      renderTaskTable();
+      renderGantt();
+    });
 
     if (window.api && window.api.onMenu) {
       window.api.onMenu(async (action, payload) => {
-        if (action === 'open-recent') {
+        if (action === 'toggle-theme') {
+          toggleTheme();
+        } else if (action === 'undo') {
+          undo();
+        } else if (action === 'redo') {
+          redo();
+        } else if (action === 'open-recent') {
           if (payload && payload.data) loadFromData(payload.data);
         } else if (action === 'new') {
           const ok = await confirmModal('現在の編集内容は破棄されます。新規プロジェクトを作成しますか？');
           if (!ok) return;
           await window.api.newProject();
           state = EMPTY_STATE();
+          historyUndo = [];
+          historyRedo = [];
           render();
         } else if (action === 'open') {
           const res = await window.api.openProject();
@@ -836,9 +1349,22 @@
         } else if (action === 'saveAs') {
           await window.api.saveProjectAs(snapshot());
         } else if (action === 'exportExcel') {
-          const orientation = await exportOrientationModal();
+          const orientation = await exportOrientationModal('Excel出力');
           if (!orientation) return;
           await window.api.exportExcel(snapshot(), orientation);
+        } else if (action === 'exportPDF') {
+          const orientation = await exportOrientationModal('PDF出力');
+          if (!orientation) return;
+          const printRoot = $('#pdf-print-root');
+          if (orientation === 'vertical') buildVerticalPrintTable(printRoot);
+          else buildHorizontalPrintTable(printRoot);
+          document.body.classList.add('pdf-export-mode');
+          try {
+            await window.api.exportPDF(snapshot());
+          } finally {
+            document.body.classList.remove('pdf-export-mode');
+            printRoot.innerHTML = '';
+          }
         } else if (action === 'about') {
           const ver = window.api && window.api.getVersion
             ? await window.api.getVersion()
@@ -848,9 +1374,9 @@
           body.style.textAlign = 'center';
           body.style.lineHeight = '2';
           body.innerHTML = `
-            <div style="font-size:18px;font-weight:bold;margin-bottom:4px;">YMB Schedule Builder</div>
-            <div style="font-size:13px;color:#64748b;margin-bottom:16px;">v${ver}</div>
-            <div style="font-size:14px;">author : ymb</div>`;
+            <div class="about-title">YMB Schedule Builder</div>
+            <div class="about-version">v${ver}</div>
+            <div class="about-author">author : ymb</div>`;
           openModal('このアプリについて', body, () => {});
         }
       });
