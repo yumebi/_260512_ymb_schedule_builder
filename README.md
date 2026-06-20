@@ -36,6 +36,9 @@
 | `YMB Schedule Builder Setup x.x.x.exe` | インストーラ版（スタートメニュー登録） |
 | `YMB Schedule Builder x.x.x.exe` | ポータブル版（インストール不要） |
 
+> コード署名をしていないため、インストール・起動時に **Windows Defender SmartScreen** が警告を表示する場合があります。  
+> 「詳細情報」→「実行」を選択してください。
+
 ### macOS
 
 | ファイル | 説明 |
