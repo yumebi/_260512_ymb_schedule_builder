@@ -6,8 +6,5 @@ Thumbs.db
 .idea/
 .claude/
 
-# Build artifacts: keep only installers and compressed archive
-dist/win-unpacked/
-dist/builder-debug.yml
-dist/*.zip
-dist/*.blockmap
+# Build artifacts (CI generates installers per-push; no need to track locally)
+dist/
