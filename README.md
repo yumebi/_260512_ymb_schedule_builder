@@ -1,12 +1,7 @@
 # YMB Schedule Builder
 
-ガントチャート式スケジュール作成アプリ（Windows / macOS 対応デスクトップアプリ）
-
----
-
-## 概要
-
-工程・担当・営業日数を入力するだけで、ガントチャートを自動生成します。  
+ガントチャート式スケジュール作成アプリ（Windows / macOS 対応デスクトップアプリ）。
+工程・担当・営業日数を入力するだけで、ガントチャートを自動生成します。
 プロジェクトファイルへの保存、Excel（横方向 / 縦方向）への出力に対応しています。
 
 ---
@@ -22,32 +17,6 @@
 - **最近使ったファイル** — 直近8件を記録してメニューからすぐに開ける
 - **自動保存** — 編集内容を自動保存し、次回起動時に前回のデータを復元
 - **ドラッグ＆ドロップ** — 工程の並び順をドラッグで変更
-
----
-
-## ダウンロード
-
-[Releases](../../releases) から最新版をダウンロードしてください。push 毎に GitHub Actions が自動ビルド・公開します。
-
-### Windows
-
-| ファイル | 説明 |
-|---|---|
-| `YMB Schedule Builder Setup x.x.x.exe` | インストーラ版（スタートメニュー登録） |
-| `YMB Schedule Builder x.x.x.exe` | ポータブル版（インストール不要） |
-
-> コード署名をしていないため、インストール・起動時に **Windows Defender SmartScreen** が警告を表示する場合があります。  
-> 「詳細情報」→「実行」を選択してください。
-
-### macOS
-
-| ファイル | 説明 |
-|---|---|
-| `YMB Schedule Builder-x.x.x.dmg` | Intel Mac 用（x64） |
-| `YMB Schedule Builder-x.x.x-arm64.dmg` | Apple Silicon 用（M1 / M2 / M3） |
-
-> macOS では初回起動時に「開発元が未確認」と表示される場合があります。  
-> Finder でファイルを右クリック →「開く」を選択してください。
 
 ---
 
@@ -76,27 +45,6 @@ npm start
 
 ---
 
-## ビルド
-
-### Windows
-
-> インストーラのビルドには **開発者モード** または **管理者権限** が必要です。  
-> 設定 → プライバシーとセキュリティ → 開発者向け → 開発者モード を ON にしてください。
-
-```powershell
-npm run build:win
-```
-
-### macOS
-
-```bash
-npm run build:mac
-```
-
-> macOS ビルドは macOS 上でのみ実行できます。
-
----
-
 ## 技術スタック
 
 | 項目 | 内容 |
@@ -109,12 +57,32 @@ npm run build:mac
 
 ---
 
-## ライセンス
+## ダウンロード
 
-[MIT License](./LICENSE) © 2026 ymb
+[Releases](../../releases) から最新版をダウンロードしてください。push 毎に GitHub Actions が自動ビルド・公開します。
+
+### Windows
+
+| ファイル | 説明 |
+|---|---|
+| `YMB Schedule Builder Setup x.x.x.exe` | インストーラ版（スタートメニュー登録） |
+| `YMB Schedule Builder x.x.x.exe` | ポータブル版（インストール不要） |
+
+> コード署名をしていないため、インストール・起動時に **Windows Defender SmartScreen** が警告を表示する場合があります。
+> 「詳細情報」→「実行」を選択してください。
+
+### macOS
+
+| ファイル | 説明 |
+|---|---|
+| `YMB Schedule Builder-x.x.x.dmg` | Intel Mac 用（x64） |
+| `YMB Schedule Builder-x.x.x-arm64.dmg` | Apple Silicon 用（M1 / M2 / M3） |
+
+> macOS では初回起動時に「開発元が未確認」と表示される場合があります。
+> Finder でファイルを右クリック →「開く」を選択してください。
 
 ---
 
-## Author
+## ライセンス
 
-author : ymb
+[MIT License](./LICENSE) © 2026 ymb
