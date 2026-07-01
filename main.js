@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const fsSync = require('fs');
@@ -109,7 +109,53 @@ async function createWindow() {
   }
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.on('close', saveWindowStateSync);
+  mainWindow.webContents.once('did-finish-load', () => checkForUpdate());
   await buildMenu();
+}
+
+// ---------- 最新版チェック ----------
+const UPDATE_REPO = 'yumebi/_260512_ymb_schedule_builder';
+
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: { 'User-Agent': 'YMB-Schedule-Builder' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return;
+    const json = await res.json();
+    const asset = (json.assets || []).find((a) => /\d+\.\d+\.\d+/.test(a.name));
+    const match = asset && asset.name.match(/(\d+\.\d+\.\d+)/);
+    if (!match) return;
+
+    const latestVersion = match[1];
+    const currentVersion = app.getVersion();
+    if (compareVersions(latestVersion, currentVersion) <= 0) return;
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '新しいバージョンがあります',
+      message: `新しいバージョン v${latestVersion} が公開されています（現在: v${currentVersion}）。`,
+      buttons: ['リリースページを開く', '後で'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (result.response === 0) {
+      shell.openExternal(json.html_url);
+    }
+  } catch {
+    // オフライン・API制限等は無視して起動を継続
+  }
 }
 
 async function buildMenu() {

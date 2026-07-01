@@ -8,10 +8,45 @@ permissions:
   contents: write
 
 jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version to')"
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Compute next version (各桁0-9、9到達で繰り上げ)
+        id: bump
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          PATCH=$((PATCH + 1))
+          if [ "$PATCH" -gt 9 ]; then PATCH=0; MINOR=$((MINOR + 1)); fi
+          if [ "$MINOR" -gt 9 ]; then MINOR=0; MAJOR=$((MAJOR + 1)); fi
+          echo "version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
+      - run: npm version "${{ steps.bump.outputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Commit and push
+        id: push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }}"
+          git push
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   build-windows:
+    needs: bump-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -24,9 +59,12 @@ jobs:
             dist/*.exe
 
   build-mac:
+    needs: bump-version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -39,10 +77,12 @@ jobs:
             dist/*.dmg
 
   release:
-    needs: [build-windows, build-mac]
+    needs: [bump-version, build-windows, build-mac]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -55,5 +95,5 @@ jobs:
             artifacts/windows-build/*.exe \
             artifacts/mac-build/*.dmg \
             --title "Build #${{ github.run_number }}" \
-            --notes "Commit: ${{ github.sha }}" \
+            --notes "Commit: ${{ needs.bump-version.outputs.sha }}" \
             --repo ${{ github.repository }}
