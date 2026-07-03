@@ -21,6 +21,8 @@
       <button id="btn-open-assignees" type="button">担当マスタ…</button>
       <button id="btn-open-holidays" type="button">祝日設定…</button>
       <button id="btn-open-milestones" type="button">マイルストーン…</button>
+      <button id="btn-open-groups" type="button">グループ…</button>
+      <button id="btn-open-templates" type="button">テンプレート…</button>
       <label>表示<select id="gantt-zoom">
           <option value="day">日</option>
           <option value="week">週</option>
@@ -29,6 +31,7 @@
       <label>担当フィルター<select id="assignee-filter">
           <option value="">全員</option>
         </select></label>
+      <label>検索<input type="text" id="task-search" placeholder="工程名検索"></label>
       <div class="spacer"></div>
       <button id="btn-add-task" type="button" class="primary">＋ 工程を追加</button>
     </section>
@@ -44,6 +47,8 @@
             <th class="col-date">開始日</th>
             <th class="col-date">終了日</th>
             <th class="col-progress">進捗%</th>
+            <th class="col-predecessor">前工程</th>
+            <th class="col-group">グループ</th>
             <th class="col-color">色</th>
             <th class="col-actions">操作</th>
           </tr>

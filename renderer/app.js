@@ -117,11 +117,14 @@
     assignees: [],
     tasks: [],
     milestones: [],
+    groups: [],
   });
 
   let state = EMPTY_STATE();
   let suppressAutoSave = true;
   let autoSaveTimer = null;
+  let hasScrolledToToday = false;
+  let taskSearchQuery = '';
 
   // ---------- undo / redo ----------
   let historyUndo = [];
@@ -253,6 +256,68 @@
     });
   }
 
+  // ---------- 依存関係（前工程） ----------
+  function nextBusinessDay(d, holSet) {
+    const next = new Date(d);
+    next.setDate(next.getDate() + 1);
+    while (!isBusinessDay(next, holSet)) next.setDate(next.getDate() + 1);
+    return next;
+  }
+  function wouldCreateCycle(taskIdx, predecessorId) {
+    if (!predecessorId) return false;
+    const taskId = state.tasks[taskIdx] && state.tasks[taskIdx]._uid;
+    if (predecessorId === taskId) return true;
+    let curId = predecessorId;
+    const visited = new Set();
+    while (curId) {
+      if (curId === taskId) return true;
+      if (visited.has(curId)) break;
+      visited.add(curId);
+      const t = state.tasks.find((x) => x._uid === curId);
+      curId = t ? t.predecessorId : null;
+    }
+    return false;
+  }
+  function ensureTaskUids() {
+    state.tasks.forEach((t) => {
+      if (!t._uid) t._uid = 'u' + Date.now() + Math.floor(Math.random() * 100000);
+    });
+  }
+  // 前工程の終了日をもとに、依存する後続工程を連鎖的に再計算する
+  function applyPredecessorShifts() {
+    ensureTaskUids();
+    const holSet = holidaySet();
+    const byUid = new Map(state.tasks.map((t) => [t._uid, t]));
+    const visiting = new Set();
+    const resolved = new Set();
+
+    function resolve(t) {
+      if (!t || resolved.has(t._uid)) return;
+      if (!t.predecessorId || !byUid.has(t.predecessorId)) {
+        resolved.add(t._uid);
+        return;
+      }
+      if (visiting.has(t._uid)) {
+        // 循環検出：これ以上たどらない
+        resolved.add(t._uid);
+        return;
+      }
+      visiting.add(t._uid);
+      const pred = byUid.get(t.predecessorId);
+      resolve(pred);
+      const predEnd = parseLocalDate(pred.end);
+      if (predEnd) {
+        const newStart = nextBusinessDay(predEnd, holSet);
+        t.start = formatDate(newStart);
+        t.end = formatDate(calcEndDate(newStart, t.days, holSet));
+      }
+      visiting.delete(t._uid);
+      resolved.add(t._uid);
+    }
+
+    state.tasks.forEach((t) => resolve(t));
+  }
+
   // ---------- task editing ----------
   function updateTaskField(idx, field, value) {
     const t = state.tasks[idx];
@@ -288,6 +353,15 @@
       if (a && !t.color) t.color = a.color;
     } else if (field === 'progress') {
       t.progress = Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+    } else if (field === 'predecessorId') {
+      const newPred = value || null;
+      if (newPred && wouldCreateCycle(idx, newPred)) {
+        // 循環になるため無視
+      } else {
+        t.predecessorId = newPred;
+      }
+    } else if (field === 'groupId') {
+      t.groupId = value || null;
     } else if (field === 'color') {
       t.color = value;
       pushHistory(before);
@@ -326,13 +400,35 @@
       end: formatDate(end),
       color,
       progress: 0,
+      predecessorId: null,
+      groupId: null,
     });
     pushHistory(before);
     render();
   }
   function removeTask(idx) {
     const before = snapshotState();
+    const removed = state.tasks[idx];
+    const removedUid = removed && removed._uid;
     state.tasks.splice(idx, 1);
+    if (removedUid) {
+      state.tasks.forEach((t) => {
+        if (t.predecessorId === removedUid) t.predecessorId = null;
+      });
+    }
+    pushHistory(before);
+    render();
+  }
+  function duplicateTask(idx) {
+    const t = state.tasks[idx];
+    if (!t) return;
+    const before = snapshotState();
+    const copy = JSON.parse(JSON.stringify(t));
+    copy._uid = 'u' + Date.now() + Math.floor(Math.random() * 100000);
+    copy.name = `${t.name} (コピー)`;
+    // 複製元を前工程とし、その直下に配置する（既存の後続の依存関係は引き継がない）
+    copy.predecessorId = t._uid || null;
+    state.tasks.splice(idx + 1, 0, copy);
     pushHistory(before);
     render();
   }
@@ -345,12 +441,86 @@
     render();
   }
 
+  // ---------- 担当者負荷判定 ----------
+  // 同一担当の工程同士が日付範囲で重なっているかを判定し、
+  // assigneeId -> 警告メッセージ（重複あり時のみ）の Map を返す
+  function computeAssigneeOverlaps() {
+    const result = new Map(); // assigneeId -> Set of task names involved
+    const byAssignee = new Map();
+    state.tasks.forEach((t) => {
+      if (!t.assigneeId || !t.start || !t.end) return;
+      if (!byAssignee.has(t.assigneeId)) byAssignee.set(t.assigneeId, []);
+      byAssignee.get(t.assigneeId).push(t);
+    });
+    byAssignee.forEach((list, assigneeId) => {
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i];
+          const b = list[j];
+          const aStart = parseLocalDate(a.start);
+          const aEnd = parseLocalDate(a.end);
+          const bStart = parseLocalDate(b.start);
+          const bEnd = parseLocalDate(b.end);
+          const overlap = aStart <= bEnd && bStart <= aEnd;
+          if (overlap) {
+            if (!result.has(assigneeId)) result.set(assigneeId, new Set());
+            result.get(assigneeId).add(a.name);
+            result.get(assigneeId).add(b.name);
+          }
+        }
+      }
+    });
+    const messages = new Map();
+    result.forEach((names, assigneeId) => {
+      messages.set(assigneeId, '同時進行: ' + Array.from(names).join(', '));
+    });
+    return messages;
+  }
+
+  // ---------- グループ（フェーズ）表示順 ----------
+  // グループごとにタスクをまとめた表示順のエントリ配列を返す。
+  // 各エントリ: { type: 'group', group } または { type: 'task', task, taskIndex }
+  function getDisplayEntries() {
+    const groups = state.groups || [];
+    const groupById = new Map(groups.map((g) => [g.id, g]));
+    const buckets = new Map(); // groupId -> [{task, taskIndex}]
+    const ungrouped = [];
+    state.tasks.forEach((t, idx) => {
+      if (t.groupId && groupById.has(t.groupId)) {
+        if (!buckets.has(t.groupId)) buckets.set(t.groupId, []);
+        buckets.get(t.groupId).push({ task: t, taskIndex: idx });
+      } else {
+        ungrouped.push({ task: t, taskIndex: idx });
+      }
+    });
+    const entries = [];
+    groups.forEach((g) => {
+      entries.push({ type: 'group', group: g });
+      const items = buckets.get(g.id) || [];
+      if (!g.collapsed) {
+        items.forEach((it) => entries.push({ type: 'task', task: it.task, taskIndex: it.taskIndex }));
+      }
+    });
+    ungrouped.forEach((it) => entries.push({ type: 'task', task: it.task, taskIndex: it.taskIndex }));
+    return entries;
+  }
+
+  function taskMatchesFilters(t) {
+    if (assigneeFilterId && t.assigneeId !== assigneeFilterId) return false;
+    if (taskSearchQuery) {
+      const q = taskSearchQuery.toLowerCase();
+      if (!(t.name || '').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }
+
   // ---------- rendering ----------
   const $ = (sel) => document.querySelector(sel);
 
   function render() {
     document.querySelectorAll('.color-popover').forEach((p) => p.remove());
     ensureTaskDates();
+    applyPredecessorShifts();
     renderAssigneeFilterOptions();
     renderTaskTable();
     renderGantt();
@@ -388,25 +558,66 @@
   function renderTaskTable() {
     const tbody = $('#task-body');
     tbody.innerHTML = '';
-    state.tasks.forEach((t, i) => {
-      if (assigneeFilterId && t.assigneeId !== assigneeFilterId) return;
+    ensureTaskUids();
+    const overlapWarnings = computeAssigneeOverlaps();
+    const targetDate = state.targetDate ? parseLocalDate(state.targetDate) : null;
+    const entries = getDisplayEntries();
+    const COL_COUNT = 11;
+
+    entries.forEach((entry) => {
+      if (entry.type === 'group') {
+        const g = entry.group;
+        const tr = document.createElement('tr');
+        tr.className = 'group-header-row';
+        tr.dataset.groupId = g.id;
+        tr.innerHTML = `<td colspan="${COL_COUNT}"><span class="group-toggle">${g.collapsed ? '▶' : '▼'}</span>${escapeHtml(g.name)}</td>`;
+        tr.addEventListener('click', () => {
+          const before = snapshotState();
+          g.collapsed = !g.collapsed;
+          pushHistory(before);
+          render();
+        });
+        tbody.appendChild(tr);
+        return;
+      }
+
+      const t = entry.task;
+      const i = entry.taskIndex;
+      if (!taskMatchesFilters(t)) return;
       const tr = document.createElement('tr');
       tr.dataset.index = i;
       const assigneeOptions = state.assignees
         .map((a) => `<option value="${escapeHtml(a.id)}" ${a.id === t.assigneeId ? 'selected' : ''}>${escapeHtml(a.label)}</option>`)
         .join('');
+      const predecessorOptions = ['<option value="">なし</option>']
+        .concat(
+          state.tasks
+            .filter((other, oi) => oi !== i && !wouldCreateCycle(i, other._uid))
+            .map((other) => `<option value="${escapeHtml(other._uid)}" ${other._uid === t.predecessorId ? 'selected' : ''}>${escapeHtml(other.name)}</option>`)
+        )
+        .join('');
+      const isOverdue = !!(targetDate && t.end && parseLocalDate(t.end) > targetDate);
+      const warning = overlapWarnings.get(t.assigneeId);
+      const groupOptions = ['<option value="">(未所属)</option>']
+        .concat((state.groups || []).map((g) => `<option value="${escapeHtml(g.id)}" ${g.id === t.groupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`))
+        .join('');
       tr.innerHTML = `
         <td class="drag-handle" title="ドラッグで並び替え">≡</td>
         <td><input type="text" data-field="name" value="${escapeHtml(t.name)}"></td>
-        <td><select data-field="assigneeId">${assigneeOptions}</select></td>
+        <td>
+          <select data-field="assigneeId">${assigneeOptions}</select>${warning ? `<span class="assignee-warning" title="${escapeHtml(warning)}">⚠</span>` : ''}
+        </td>
         <td><input type="number" min="1" data-field="days" value="${t.days}"></td>
         <td><input type="date" data-field="start" value="${escapeHtml(t.start)}"></td>
-        <td><input type="date" data-field="end" value="${escapeHtml(t.end)}"></td>
+        <td><input type="date" data-field="end" value="${escapeHtml(t.end)}" class="${isOverdue ? 'date-overdue' : ''}"></td>
         <td><input type="number" min="0" max="100" data-field="progress" value="${t.progress || 0}"></td>
+        <td><select data-field="predecessorId">${predecessorOptions}</select></td>
+        <td><select data-field="groupId">${groupOptions}</select></td>
         <td class="color-cell"></td>
         <td>
           <button class="icon" data-action="up" title="上へ">↑</button>
           <button class="icon" data-action="down" title="下へ">↓</button>
+          <button class="icon" data-action="dup" title="複製">⧉</button>
           <button class="icon danger" data-action="del" title="削除">×</button>
         </td>`;
       const picker = createColorPicker(t.color || '#888888', (c) =>
@@ -416,7 +627,7 @@
       tbody.appendChild(tr);
     });
 
-    tbody.querySelectorAll('tr').forEach((tr) => {
+    tbody.querySelectorAll('tr[data-index]').forEach((tr) => {
       const idx = Number(tr.dataset.index);
       tr.querySelectorAll('[data-field]').forEach((el) => {
         const field = el.dataset.field;
@@ -424,15 +635,14 @@
         el.addEventListener(eventName, (e) => updateTaskField(idx, field, e.target.value));
         if (field === 'name') wireUndoableText(el);
       });
-    });
-    tbody.querySelectorAll('button').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const row = e.target.closest('tr');
-        const idx = Number(row.dataset.index);
-        const action = btn.dataset.action;
-        if (action === 'up') moveTask(idx, -1);
-        else if (action === 'down') moveTask(idx, 1);
-        else if (action === 'del') removeTask(idx);
+      tr.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const action = btn.dataset.action;
+          if (action === 'up') moveTask(idx, -1);
+          else if (action === 'down') moveTask(idx, 1);
+          else if (action === 'del') removeTask(idx);
+          else if (action === 'dup') duplicateTask(idx);
+        });
       });
     });
     setupDragDrop(tbody);
@@ -440,7 +650,7 @@
 
   function setupDragDrop(tbody) {
     let dragIdx = null;
-    tbody.querySelectorAll('tr').forEach((tr) => {
+    tbody.querySelectorAll('tr[data-index]').forEach((tr) => {
       const handle = tr.querySelector('.drag-handle');
       if (handle) {
         handle.draggable = true;
@@ -464,7 +674,7 @@
         if (dragIdx === null) return;
         e.preventDefault();
         const dropIdx = Number(tr.dataset.index);
-        if (dragIdx === dropIdx) {
+        if (dragIdx === dropIdx || Number.isNaN(dropIdx)) {
           dragIdx = null;
           return;
         }
@@ -612,15 +822,54 @@
       monthRow.appendChild(mc);
     });
 
-    state.tasks.forEach((t, idx) => {
-      if (assigneeFilterId && t.assigneeId !== assigneeFilterId) return;
+    // 今日マーカー（ヘッダ側）
+    const todayIso = formatDate(new Date());
+    const todayIdx = dayInfos.findIndex((info) => info.iso === todayIso);
+    if (todayIdx >= 0) {
+      const marker = document.createElement('div');
+      marker.className = 'today-marker';
+      marker.style.left = `${todayIdx * dayWidth}px`;
+      marker.style.height = `${dayRow.offsetHeight || 0}px`;
+      dayRow.style.position = dayRow.style.position || 'relative';
+      dayRow.appendChild(marker);
+    }
+
+    const overlapWarnings = computeAssigneeOverlaps();
+    const entries = getDisplayEntries();
+
+    entries.forEach((entry) => {
+      if (entry.type === 'group') {
+        const g = entry.group;
+        const gRow = document.createElement('div');
+        gRow.className = 'gantt-group-row';
+        gRow.textContent = `${g.collapsed ? '▶' : '▼'} ${g.name}`;
+        gRow.addEventListener('click', () => {
+          const before = snapshotState();
+          g.collapsed = !g.collapsed;
+          pushHistory(before);
+          render();
+        });
+        leftList.appendChild(gRow);
+
+        const gSpacer = document.createElement('div');
+        gSpacer.className = 'gantt-group-spacer';
+        gSpacer.style.height = '28px';
+        gSpacer.style.width = `${totalChartWidth}px`;
+        chartBody.appendChild(gSpacer);
+        return;
+      }
+
+      const t = entry.task;
+      const idx = entry.taskIndex;
+      if (!taskMatchesFilters(t)) return;
       const a = state.assignees.find((x) => x.id === t.assigneeId);
+      const warning = overlapWarnings.get(t.assigneeId);
 
       const lRow = document.createElement('div');
       lRow.className = 'row-item';
       lRow.innerHTML = `
         <div class="cell-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</div>
-        <div class="cell-role">${escapeHtml(a ? a.label : '')}</div>`;
+        <div class="cell-role">${escapeHtml(a ? a.label : '')}${warning ? `<span class="assignee-warning" title="${escapeHtml(warning)}">⚠</span>` : ''}</div>`;
       leftList.appendChild(lRow);
 
       const cRow = document.createElement('div');
@@ -641,6 +890,12 @@
           marker.style.left = `${i * dayWidth}px`;
           cRow.appendChild(marker);
         }
+        if (info.iso === todayIso) {
+          const tm = document.createElement('div');
+          tm.className = 'today-marker';
+          tm.style.left = `${i * dayWidth}px`;
+          cRow.appendChild(tm);
+        }
       });
       const ts = parseLocalDate(t.start);
       const te = parseLocalDate(t.end);
@@ -648,7 +903,8 @@
       const span = Math.round((te - ts) / 86400000) + 1;
       const barWidth = Math.max(span * dayWidth - 4, 6);
       const bar = document.createElement('div');
-      bar.className = 'gantt-bar';
+      const isOverdue = !!(state.targetDate && te > parseLocalDate(state.targetDate));
+      bar.className = 'gantt-bar' + (isOverdue ? ' gantt-bar-overdue' : '');
       bar.style.left = `${barLeft}px`;
       bar.style.width = `${barWidth}px`;
       bar.style.background = t.color || '#666';
@@ -663,6 +919,18 @@
       cRow.appendChild(bar);
       chartBody.appendChild(cRow);
     });
+
+    if (!hasScrolledToToday) {
+      hasScrolledToToday = true;
+      if (todayIdx >= 0) {
+        const scrollArea = $('#scroll-area');
+        if (scrollArea) {
+          const marginDays = 2;
+          const targetLeft = Math.max(0, (todayIdx - marginDays) * dayWidth);
+          scrollArea.scrollLeft = targetLeft;
+        }
+      }
+    }
   }
 
   function renderStatus() {
@@ -678,7 +946,15 @@
     });
     const target = parseLocalDate(state.targetDate);
     const over = target && maxEnd > target;
-    const label = `予測完了日: ${maxEnd.toLocaleDateString()} ${over ? '⚠ 納期オーバー' : '✓ オンスケジュール'}`;
+    let totalDays = 0;
+    let weightedProgress = 0;
+    state.tasks.forEach((t) => {
+      const d = Math.max(0, t.days || 0);
+      totalDays += d;
+      weightedProgress += d * (t.progress || 0);
+    });
+    const overallProgress = totalDays > 0 ? Math.round(weightedProgress / totalDays) : 0;
+    const label = `予測完了日: ${maxEnd.toLocaleDateString()} ${over ? '⚠ 納期オーバー' : '✓ オンスケジュール'} ／ 全体進捗: ${overallProgress}%`;
     const el = $('#status-area');
     el.textContent = label;
     el.className = over ? 'over' : 'ok';
@@ -984,6 +1260,225 @@
     });
   }
 
+  function openGroupsModal() {
+    const wrap = document.createElement('div');
+    wrap.className = 'assignee-list';
+    const draft = (state.groups || []).map((g) => ({ ...g }));
+    function repaint() {
+      wrap.innerHTML = '';
+      draft.forEach((g, i) => {
+        const row = document.createElement('div');
+        row.className = 'assignee-row';
+        row.innerHTML = `
+          <input type="text" value="${escapeHtml(g.name)}" placeholder="グループ名">
+          <button class="icon danger" type="button">×</button>`;
+        const nameEl = row.querySelector('input[type="text"]');
+        const delBtn = row.querySelector('button');
+        nameEl.addEventListener('change', (e) => (draft[i].name = e.target.value));
+        delBtn.addEventListener('click', () => {
+          draft.splice(i, 1);
+          repaint();
+        });
+        wrap.appendChild(row);
+      });
+      const add = document.createElement('div');
+      add.className = 'add-row';
+      add.innerHTML = `<button type="button">＋ グループを追加</button>`;
+      add.querySelector('button').addEventListener('click', () => {
+        const id = 'g' + Date.now() + Math.floor(Math.random() * 1000);
+        draft.push({ id, name: '新規グループ', collapsed: false });
+        repaint();
+      });
+      wrap.appendChild(add);
+    }
+    repaint();
+    openModal('グループ（フェーズ）の編集', wrap, () => {
+      const before = snapshotState();
+      const valid = draft.filter((g) => g.name && g.name.trim() !== '');
+      valid.forEach((g) => {
+        if (!g.id) g.id = 'g' + Date.now() + Math.floor(Math.random() * 1000);
+      });
+      const validIds = new Set(valid.map((g) => g.id));
+      state.groups = valid;
+      state.tasks.forEach((t) => {
+        if (t.groupId && !validIds.has(t.groupId)) t.groupId = null;
+      });
+      pushHistory(before);
+      render();
+    });
+  }
+
+  // ---------- テンプレート ----------
+  function buildTemplateFromCurrent() {
+    return {
+      tasks: state.tasks.map((t) => ({
+        name: t.name,
+        assigneeId: t.assigneeId || null,
+        days: t.days,
+        color: t.color || null,
+        progress: 0,
+        groupId: t.groupId || null,
+      })),
+      groups: (state.groups || []).map((g) => ({ ...g })),
+    };
+  }
+
+  // テンプレートの担当・グループを現在のマスタへ解決しつつ工程配列を作る
+  function materializeTemplateTasks(template) {
+    const groupIdMap = new Map();
+    const groups = Array.isArray(template.groups) ? template.groups : [];
+    const newGroups = groups.map((g) => {
+      const newId = 'g' + Date.now() + Math.floor(Math.random() * 100000);
+      groupIdMap.set(g.id, newId);
+      return { id: newId, name: g.name, collapsed: !!g.collapsed };
+    });
+    const tasks = (Array.isArray(template.tasks) ? template.tasks : []).map((t) => {
+      const assigneeExists = t.assigneeId && state.assignees.some((a) => a.id === t.assigneeId);
+      return {
+        name: t.name || '工程',
+        assigneeId: assigneeExists ? t.assigneeId : '',
+        days: Math.max(1, parseInt(t.days, 10) || 1),
+        start: '',
+        end: '',
+        color: t.color || (state.assignees.find((a) => a.id === t.assigneeId) || {}).color || '#888888',
+        progress: 0,
+        predecessorId: null,
+        groupId: t.groupId && groupIdMap.has(t.groupId) ? groupIdMap.get(t.groupId) : null,
+      };
+    });
+    return { tasks, groups: newGroups };
+  }
+
+  function openTemplatesModal() {
+    const container = document.createElement('div');
+    const hint = document.createElement('div');
+    hint.className = 'hint-text';
+    hint.textContent = '現在の工程一覧をテンプレートとして保存、または保存済みテンプレートを適用できます。';
+    container.appendChild(hint);
+
+    const saveBar = document.createElement('div');
+    saveBar.className = 'holiday-fetch-bar';
+    saveBar.innerHTML = `
+      <input type="text" id="tpl-new-name" placeholder="テンプレート名" class="flex-1">
+      <button type="button" id="tpl-save-btn">現在の工程を保存</button>`;
+    container.appendChild(saveBar);
+
+    const applyModeWrap = document.createElement('div');
+    applyModeWrap.className = 'inline-label-row';
+    applyModeWrap.style.marginBottom = '10px';
+    applyModeWrap.innerHTML = `
+      <span>適用方法:</span>
+      <label><input type="radio" name="tpl-apply-mode" value="replace" checked> 現在の工程を全置換</label>
+      <label><input type="radio" name="tpl-apply-mode" value="append"> 末尾に追加</label>`;
+    container.appendChild(applyModeWrap);
+
+    const listWrap = document.createElement('div');
+    listWrap.className = 'holiday-list';
+    container.appendChild(listWrap);
+
+    let templates = [];
+    async function loadList() {
+      templates = (window.api && window.api.listTemplates) ? await window.api.listTemplates() : [];
+      repaintList();
+    }
+    function repaintList() {
+      listWrap.innerHTML = '';
+      if (templates.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'fetch-status-text';
+        empty.textContent = '保存済みのテンプレートはありません。';
+        listWrap.appendChild(empty);
+        return;
+      }
+      templates.forEach((tpl) => {
+        const row = document.createElement('div');
+        row.className = 'holiday-row';
+        const taskCount = Array.isArray(tpl.tasks) ? tpl.tasks.length : 0;
+        row.innerHTML = `
+          <span class="flex-1">${escapeHtml(tpl.name)}（${taskCount}件）</span>
+          <button type="button" data-action="apply">適用</button>
+          <button class="icon danger" type="button" data-action="delete">×</button>`;
+        row.querySelector('[data-action="apply"]').addEventListener('click', async () => {
+          const mode = container.querySelector('input[name="tpl-apply-mode"]:checked').value;
+          const before = snapshotState();
+          const { tasks: newTasks, groups: newGroups } = materializeTemplateTasks(tpl);
+          if (mode === 'replace') {
+            state.tasks = newTasks;
+            state.groups = newGroups;
+          } else {
+            state.tasks = state.tasks.concat(newTasks);
+            state.groups = (state.groups || []).concat(newGroups);
+          }
+          recalcAll();
+          pushHistory(before);
+          render();
+          $('#modal-root').classList.add('hidden');
+        });
+        row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+          if (window.api && window.api.deleteTemplate) {
+            await window.api.deleteTemplate(tpl.id);
+          }
+          await loadList();
+        });
+        listWrap.appendChild(row);
+      });
+    }
+    loadList();
+
+    saveBar.querySelector('#tpl-save-btn').addEventListener('click', async () => {
+      const nameInput = saveBar.querySelector('#tpl-new-name');
+      const name = (nameInput.value || '').trim();
+      if (!name) return;
+      const template = { name, ...buildTemplateFromCurrent() };
+      if (window.api && window.api.saveTemplate) {
+        await window.api.saveTemplate(template);
+      }
+      nameInput.value = '';
+      await loadList();
+    });
+
+    $('#modal-title').textContent = 'テンプレート';
+    const bodyEl = $('#modal-body');
+    bodyEl.innerHTML = '';
+    bodyEl.appendChild(container);
+    const footer = document.querySelector('#modal-root .modal-footer');
+    const origFooter = footer.innerHTML;
+    footer.innerHTML = `<button type="button" id="modal-cancel">閉じる</button>`;
+    $('#modal-root').classList.remove('hidden');
+    const close = () => {
+      $('#modal-root').classList.add('hidden');
+      footer.innerHTML = origFooter;
+    };
+    document.getElementById('modal-cancel').onclick = close;
+    $('#modal-close').onclick = close;
+    document.querySelector('#modal-root .modal-backdrop').onclick = close;
+  }
+
+  // ---------- Excelインポート ----------
+  async function importExcelFlow() {
+    const ok = await confirmModal('現在の工程を置き換えます。よろしいですか？', 'Excelから読み込み');
+    if (!ok) return;
+    if (!window.api || !window.api.importExcel) return;
+    const res = await window.api.importExcel(state.assignees);
+    if (!res || !Array.isArray(res.tasks)) return;
+    const before = snapshotState();
+    state.assignees = res.assignees || state.assignees;
+    state.tasks = res.tasks.map((t) => ({
+      name: t.name,
+      assigneeId: t.assigneeId || '',
+      days: t.days,
+      start: '',
+      end: '',
+      color: (state.assignees.find((a) => a.id === t.assigneeId) || {}).color || '#888888',
+      progress: t.progress || 0,
+      predecessorId: null,
+      groupId: null,
+    }));
+    recalcAll();
+    pushHistory(before);
+    render();
+  }
+
   // ---------- file ops ----------
   function snapshot() {
     return {
@@ -996,6 +1491,7 @@
       assignees: state.assignees,
       tasks: state.tasks,
       milestones: state.milestones,
+      groups: state.groups,
     };
   }
   function loadFromData(data) {
@@ -1016,8 +1512,14 @@
     state.assignees = Array.isArray(data.assignees) ? data.assignees : [];
     state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
     state.milestones = Array.isArray(data.milestones) ? data.milestones : [];
+    state.groups = Array.isArray(data.groups) ? data.groups : [];
+    state.tasks.forEach((t) => {
+      if (t.predecessorId === undefined) t.predecessorId = null;
+      if (t.groupId === undefined) t.groupId = null;
+    });
     historyUndo = [];
     historyRedo = [];
+    hasScrolledToToday = false;
     render();
   }
 
@@ -1056,12 +1558,19 @@
     $('#btn-open-assignees').addEventListener('click', openAssigneesModal);
     $('#btn-open-holidays').addEventListener('click', openHolidaysModal);
     $('#btn-open-milestones').addEventListener('click', openMilestonesModal);
+    $('#btn-open-groups').addEventListener('click', openGroupsModal);
+    $('#btn-open-templates').addEventListener('click', openTemplatesModal);
     $('#gantt-zoom').addEventListener('change', (e) => {
       ganttZoom = e.target.value;
       renderGantt();
     });
     $('#assignee-filter').addEventListener('change', (e) => {
       assigneeFilterId = e.target.value;
+      renderTaskTable();
+      renderGantt();
+    });
+    $('#task-search').addEventListener('input', (e) => {
+      taskSearchQuery = e.target.value || '';
       renderTaskTable();
       renderGantt();
     });
@@ -1095,6 +1604,8 @@
           const orientation = await exportOrientationModal('Excel出力');
           if (!orientation) return;
           await window.api.exportExcel(snapshot(), orientation);
+        } else if (action === 'importExcel') {
+          await importExcelFlow();
         } else if (action === 'about') {
           const ver = window.api && window.api.getVersion
             ? await window.api.getVersion()

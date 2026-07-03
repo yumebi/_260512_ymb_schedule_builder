@@ -193,6 +193,7 @@ async function buildMenu() {
         { label: '名前を付けて保存...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenu('saveAs') },
         { type: 'separator' },
         { label: 'Excel出力...', accelerator: 'CmdOrCtrl+E', click: () => sendMenu('exportExcel') },
+        { label: 'Excelから読み込み...', click: () => sendMenu('importExcel') },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit', label: '終了' },
       ],
@@ -376,6 +377,58 @@ ipcMain.handle('project:exportExcel', async (_e, data, orientation) => {
   }
 });
 
+// ---------- テンプレート ----------
+function templatesPath() {
+  return path.join(app.getPath('userData'), 'templates.json');
+}
+
+async function getTemplates() {
+  try {
+    const text = await fs.readFile(templatesPath(), 'utf-8');
+    const list = JSON.parse(text);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveTemplates(list) {
+  await fs.writeFile(templatesPath(), JSON.stringify(list, null, 2), 'utf-8');
+}
+
+ipcMain.handle('template:list', async () => {
+  return await getTemplates();
+});
+
+ipcMain.handle('template:save', async (_e, template) => {
+  try {
+    const list = await getTemplates();
+    const id = template.id || ('t' + Date.now() + Math.floor(Math.random() * 1000));
+    const idx = list.findIndex((t) => t.id === id);
+    const record = { ...template, id };
+    if (idx >= 0) {
+      list[idx] = record;
+    } else {
+      list.push(record);
+    }
+    await saveTemplates(list);
+    return { ok: true, id };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+});
+
+ipcMain.handle('template:delete', async (_e, id) => {
+  try {
+    let list = await getTemplates();
+    list = list.filter((t) => t.id !== id);
+    await saveTemplates(list);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+});
+
 function parseLocalDate(s) {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d);
@@ -389,6 +442,152 @@ function hexToArgb(hex) {
   if (h.length === 3) h = h.split('').map((c) => c + c).join('');
   return 'FF' + h.toUpperCase();
 }
+
+// グループ順に並べたエントリ配列を作る： { type: 'group', group } | { type: 'task', task }
+function buildGroupedEntries(tasks, groups) {
+  const groupList = Array.isArray(groups) ? groups : [];
+  if (groupList.length === 0) {
+    return tasks.map((t) => ({ type: 'task', task: t }));
+  }
+  const groupById = new Map(groupList.map((g) => [g.id, g]));
+  const buckets = new Map();
+  const ungrouped = [];
+  tasks.forEach((t) => {
+    if (t.groupId && groupById.has(t.groupId)) {
+      if (!buckets.has(t.groupId)) buckets.set(t.groupId, []);
+      buckets.get(t.groupId).push(t);
+    } else {
+      ungrouped.push(t);
+    }
+  });
+  const entries = [];
+  groupList.forEach((g) => {
+    const items = buckets.get(g.id) || [];
+    if (items.length === 0) return;
+    entries.push({ type: 'group', group: g });
+    items.forEach((t) => entries.push({ type: 'task', task: t }));
+  });
+  ungrouped.forEach((t) => entries.push({ type: 'task', task: t }));
+  return entries;
+}
+
+// ---------- Excelインポート ----------
+function parseProgressValue(v) {
+  if (v == null) return 0;
+  if (typeof v === 'number') {
+    // ExcelJS はパーセント書式のセルを 0-1 の小数として返すことがある
+    const n = v <= 1 ? Math.round(v * 100) : Math.round(v);
+    return Math.max(0, Math.min(100, n));
+  }
+  const s = String(v).trim();
+  const m = s.match(/-?\d+(\.\d+)?/);
+  if (!m) return 0;
+  let n = parseFloat(m[0]);
+  if (s.includes('%')) {
+    n = Math.round(n);
+  } else if (n <= 1) {
+    n = Math.round(n * 100);
+  } else {
+    n = Math.round(n);
+  }
+  return Math.max(0, Math.min(100, n));
+}
+
+function parseDaysValue(v) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+ipcMain.handle('project:importExcel', async (_e, currentAssignees) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Excelから読み込み',
+    filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
+    properties: ['openFile'],
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const filePath = result.filePaths[0];
+  try {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(filePath);
+    const ws = wb.worksheets[0];
+    if (!ws) throw new Error('ワークシートが見つかりません');
+
+    // 「作業項目」を含むヘッダ行を探す
+    let headerRowNum = null;
+    let colMap = null;
+    const rowCount = ws.rowCount;
+    for (let r = 1; r <= rowCount; r++) {
+      const row = ws.getRow(r);
+      let nameCol = null;
+      let assigneeCol = null;
+      let daysCol = null;
+      let progressCol = null;
+      const colCount = Math.max(row.cellCount, ws.columnCount || 0);
+      for (let c = 1; c <= colCount; c++) {
+        const v = row.getCell(c).value;
+        const text = v == null ? '' : String(v.text != null ? v.text : v).trim();
+        if (text === '作業項目') nameCol = c;
+        else if (text === '担当') assigneeCol = c;
+        else if (text === '営業日') daysCol = c;
+        else if (text === '進捗') progressCol = c;
+      }
+      if (nameCol) {
+        headerRowNum = r;
+        colMap = { nameCol, assigneeCol, daysCol, progressCol };
+        break;
+      }
+    }
+    if (!headerRowNum || !colMap) {
+      throw new Error('「作業項目」列を含むヘッダ行が見つかりませんでした');
+    }
+
+    const assignees = Array.isArray(currentAssignees) ? currentAssignees.map((a) => ({ ...a })) : [];
+    const findOrCreateAssignee = (label) => {
+      if (!label) return null;
+      const trimmed = String(label).trim();
+      if (!trimmed) return null;
+      let a = assignees.find((x) => x.label === trimmed);
+      if (!a) {
+        a = {
+          id: 'a' + Date.now() + Math.floor(Math.random() * 100000),
+          label: trimmed,
+          color: '#888888',
+        };
+        assignees.push(a);
+      }
+      return a.id;
+    };
+
+    const tasks = [];
+    for (let r = headerRowNum + 1; r <= rowCount + 1; r++) {
+      const row = ws.getRow(r);
+      const nameCellVal = row.getCell(colMap.nameCol).value;
+      const name = nameCellVal == null ? '' : String(nameCellVal.text != null ? nameCellVal.text : nameCellVal).trim();
+      if (!name) break;
+      const assigneeRaw = colMap.assigneeCol ? row.getCell(colMap.assigneeCol).value : null;
+      const assigneeLabel = assigneeRaw == null ? '' : String(assigneeRaw.text != null ? assigneeRaw.text : assigneeRaw).trim();
+      const daysRaw = colMap.daysCol ? row.getCell(colMap.daysCol).value : null;
+      const progressRaw = colMap.progressCol ? row.getCell(colMap.progressCol).value : null;
+      tasks.push({
+        name,
+        assigneeId: findOrCreateAssignee(assigneeLabel),
+        days: parseDaysValue(daysRaw),
+        progress: parseProgressValue(progressRaw),
+        color: null,
+        groupId: null,
+      });
+    }
+
+    if (tasks.length === 0) {
+      throw new Error('工程データが見つかりませんでした');
+    }
+
+    return { tasks, assignees, filePath };
+  } catch (e) {
+    dialog.showErrorBox('Excel読み込みエラー', String(e.message || e));
+    return null;
+  }
+});
 
 async function writeExcelHorizontal(filePath, data) {
   const wb = new ExcelJS.Workbook();
@@ -537,10 +736,25 @@ async function writeExcelHorizontal(filePath, data) {
     }
   });
 
-  // Row 5+: 工程行
+  // Row 5+: 工程行（グループ見出し行を含む）
   const taskRowStart = 5;
-  tasks.forEach((t, idx) => {
-    const r = taskRowStart + idx;
+  const GROUP_ARGB = 'FFE5E7EB';
+  const entries = buildGroupedEntries(tasks, data.groups);
+  let r = taskRowStart;
+  entries.forEach((entry) => {
+    if (entry.type === 'group') {
+      ws.mergeCells(r, 1, r, totalCols);
+      const gc = ws.getCell(r, 1);
+      gc.value = entry.group.name;
+      gc.font = { bold: true };
+      gc.alignment = { vertical: 'middle' };
+      gc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GROUP_ARGB } };
+      gc.border = headerBorder;
+      ws.getRow(r).height = 20;
+      r++;
+      return;
+    }
+    const t = entry.task;
     const assignee = findAssignee(t.assigneeId);
     ws.getCell(r, 1).value = t.name;
     ws.getCell(r, 2).value = assignee ? assignee.label : '';
@@ -578,7 +792,10 @@ async function writeExcelHorizontal(filePath, data) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: taskArgb } };
       }
     });
+    ws.getRow(r).height = 22;
+    r++;
   });
+  const lastDataRow = r - 1;
 
   // 列幅
   ws.getColumn(1).width = 26;
@@ -592,10 +809,9 @@ async function writeExcelHorizontal(filePath, data) {
   ws.getRow(2).height = 22;
   ws.getRow(3).height = 18;
   ws.getRow(4).height = 22;
-  for (let i = 0; i < tasks.length; i++) ws.getRow(taskRowStart + i).height = 22;
 
   if (data.note) {
-    const noteRow = taskRowStart + tasks.length + 1;
+    const noteRow = lastDataRow + 2;
     ws.mergeCells(noteRow, 1, noteRow, 6);
     const c = ws.getCell(noteRow, 1);
     c.value = data.note;

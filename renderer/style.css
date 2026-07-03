@@ -27,6 +27,10 @@
   --left-total-width: 332px;
   --header-height: 70px;
   --row-height: 44px;
+  --today-marker-color: #f43f5e;
+  --overdue-color: #dc2626;
+  --overdue-bg: #fef2f2;
+  --warning-color: #d97706;
 }
 
 [data-theme="dark"] {
@@ -52,6 +56,10 @@
   --shadow-color: rgba(0, 0, 0, 0.4);
   --modal-shadow: rgba(0, 0, 0, 0.6);
   --backdrop-color: rgba(0, 0, 0, 0.6);
+  --today-marker-color: #fb7185;
+  --overdue-color: #f87171;
+  --overdue-bg: #3f1d1d;
+  --warning-color: #fbbf24;
 }
 
 * { box-sizing: border-box; }
@@ -128,7 +136,9 @@ button.icon { padding: 4px 8px; }
 .col-progress { width: 70px; }
 .col-progress input[type="number"] { width: 56px; }
 .col-color { width: 60px; }
-.col-actions { width: 90px; }
+.col-predecessor { width: 130px; }
+.col-group { width: 120px; }
+.col-actions { width: 116px; }
 #calendar-header { width: max-content; }
 .settings-panel select {
   padding: 4px 6px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 12px;
@@ -278,6 +288,36 @@ button.icon { padding: 4px 8px; }
 .day-cell.milestone-day::after {
   content: "◆"; position: absolute; top: -1px; left: 50%; transform: translateX(-50%);
   font-size: 9px; color: var(--danger-color);
+}
+
+.today-marker {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--today-marker-color); z-index: 8; pointer-events: none;
+}
+.day-cell.today-col { box-shadow: inset 0 0 0 1px var(--today-marker-color); }
+
+.date-overdue { color: var(--overdue-color) !important; font-weight: bold; }
+.gantt-bar-overdue { outline: 2px solid var(--overdue-color); outline-offset: 1px; }
+
+.assignee-warning {
+  color: var(--warning-color); margin-left: 4px; cursor: help; font-size: 12px;
+}
+
+.group-header-row td {
+  background: var(--subtle-bg); font-weight: bold; color: var(--text-strong);
+  cursor: pointer; user-select: none; padding: 6px 8px;
+}
+.group-header-row .group-toggle { display: inline-block; width: 14px; }
+.group-header-row.dragover-group td { border-top: 2px solid var(--primary-color); }
+
+.gantt-group-row {
+  height: 28px; display: flex; align-items: center;
+  background: var(--subtle-bg); font-weight: bold; font-size: 12px;
+  color: var(--text-strong); border-bottom: 1px solid var(--soft-border);
+  padding-left: 8px; box-sizing: border-box; cursor: pointer; user-select: none;
+}
+.gantt-group-spacer {
+  border-bottom: 1px solid var(--soft-border); box-sizing: border-box;
 }
 
 .note-section {
