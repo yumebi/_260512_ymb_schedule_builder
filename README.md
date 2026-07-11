@@ -55,7 +55,7 @@ npm start
 
 | 項目 | 内容 |
 |---|---|
-| フレームワーク | [Electron](https://www.electronjs.org/) v42 |
+| フレームワーク | [Electron](https://www.electronjs.org/) v43 |
 | UI | HTML / CSS / Vanilla JavaScript |
 | Excel 出力 | [ExcelJS](https://github.com/exceljs/exceljs) v4 |
 | ビルドツール | [electron-builder](https://www.electron.build/) v26 |
