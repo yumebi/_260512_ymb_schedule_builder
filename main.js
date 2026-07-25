@@ -222,12 +222,6 @@ async function buildMenu() {
         { label: 'ダークモード切替', accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('toggle-theme') },
       ],
     },
-    {
-      label: 'ヘルプ',
-      submenu: [
-        { label: 'このアプリについて', click: () => sendMenu('about') },
-      ],
-    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

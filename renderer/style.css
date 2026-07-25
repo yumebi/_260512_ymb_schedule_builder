@@ -1,18 +1,21 @@
+/* 汎用の色は ymb-base.css のトークンから引く。ここに生の色値を増やさないこと。
+   ガント固有の色(土日・祝日・月区切り・期限超過など)と寸法は
+   このアプリの領域なので、名前も値もここに残している。 */
 :root {
-  --bg-color: #f1f5f9;
-  --panel-bg: #ffffff;
-  --subtle-bg: #f8fafc;
-  --input-bg: #ffffff;
-  --border-color: #cbd5e1;
-  --soft-border: #e2e8f0;
-  --primary-color: #2563eb;
-  --primary-hover: #1d4ed8;
-  --danger-color: #ef4444;
+  --bg-color: var(--ymb-bg);
+  --panel-bg: var(--ymb-surface);
+  --subtle-bg: var(--ymb-surface-alt);
+  --input-bg: var(--ymb-surface);
+  --border-color: var(--ymb-border);
+  --soft-border: var(--ymb-border-soft);
+  --primary-color: var(--ymb-accent);
+  --primary-hover: var(--ymb-accent-hover);
+  --danger-color: var(--ymb-danger);
   --danger-hover-bg: #fef2f2;
-  --text-color: #1e293b;
-  --text-strong: #334155;
-  --muted: #64748b;
-  --ok-color: #15803d;
+  --text-color: var(--ymb-fg);
+  --text-strong: var(--ymb-fg);
+  --muted: var(--ymb-fg-dim);
+  --ok-color: var(--ymb-good);
   --weekend-sat-bg: #eff6ff;
   --weekend-sat-text: #2563eb;
   --holiday-bg: #fff1f2;
@@ -30,24 +33,13 @@
   --today-marker-color: #f43f5e;
   --overdue-color: #dc2626;
   --overdue-bg: #fef2f2;
-  --warning-color: #d97706;
+  --warning-color: var(--ymb-warning);
 }
 
+/* 汎用の色は ymb-base.css 側が [data-theme="dark"] で切り替わるので
+   ここでの再指定は不要。ガント固有の色だけを暗色側に差し替える。 */
 [data-theme="dark"] {
-  --bg-color: #0f172a;
-  --panel-bg: #1e293b;
-  --subtle-bg: #1a2333;
-  --input-bg: #1a2333;
-  --border-color: #334155;
-  --soft-border: #2a3850;
-  --primary-color: #3b82f6;
-  --primary-hover: #2563eb;
-  --danger-color: #f87171;
   --danger-hover-bg: #3f1d1d;
-  --text-color: #e2e8f0;
-  --text-strong: #cbd5e1;
-  --muted: #94a3b8;
-  --ok-color: #4ade80;
   --weekend-sat-bg: #16243d;
   --weekend-sat-text: #60a5fa;
   --holiday-bg: #3a1620;
@@ -65,7 +57,6 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
-  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", system-ui, sans-serif;
   background: var(--bg-color);
   color: var(--text-color);
   font-size: 13px;
@@ -84,6 +75,8 @@ body {
 #status-area { font-weight: bold; color: var(--muted); }
 #status-area.over { color: var(--danger-color); }
 #status-area.ok { color: var(--ok-color); }
+/* ヘッダー右端に寄せる。margin-left:auto で間の要素を押し出す */
+#app-version { margin-left: auto; font-size: 11px; color: var(--muted); }
 
 .settings-panel {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -378,6 +371,3 @@ button.icon { padding: 4px 8px; }
 .year-range-input { width: 70px; }
 .fetch-status-text { font-size: 11px; color: var(--muted); }
 .flex-1 { flex: 1; }
-.about-title { font-size: 18px; font-weight: bold; margin-bottom: 4px; }
-.about-version { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
-.about-author { font-size: 14px; }

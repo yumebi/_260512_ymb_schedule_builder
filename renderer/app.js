@@ -1606,27 +1606,26 @@
           await window.api.exportExcel(snapshot(), orientation);
         } else if (action === 'importExcel') {
           await importExcelFlow();
-        } else if (action === 'about') {
-          const ver = window.api && window.api.getVersion
-            ? await window.api.getVersion()
-            : '';
-          const body = document.createElement('div');
-          body.style.padding = '24px 8px';
-          body.style.textAlign = 'center';
-          body.style.lineHeight = '2';
-          body.innerHTML = `
-            <div class="about-title">YMB Schedule Builder</div>
-            <div class="about-version">v${ver}</div>
-            <div class="about-author">author : ymb</div>`;
-          openModal('このアプリについて', body, () => {});
         }
       });
+    }
+  }
+
+  // 他のYMBアプリと同じく、専用ダイアログを開かせずガワに常時表示する
+  async function showAppVersion() {
+    const el = document.getElementById('app-version');
+    if (!el || !window.api || !window.api.getVersion) return;
+    try {
+      el.textContent = `v${await window.api.getVersion()}`;
+    } catch {
+      // バージョンが取れなくても動作には影響しないので黙って空のままにする
     }
   }
 
   // ---------- boot ----------
   async function boot() {
     wire();
+    showAppVersion();
     let restored = null;
     if (window.api && window.api.loadLastState) {
       try {
