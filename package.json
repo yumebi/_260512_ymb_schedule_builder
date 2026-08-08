@@ -1,6 +1,6 @@
 {
   "name": "schedule_builder",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "YMB Schedule Builder — ガントチャート式スケジュール作成アプリ",
   "main": "main.js",
   "author": "",
