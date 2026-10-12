@@ -54,7 +54,6 @@ jobs:
       - run: npm run build:win -- --publish=never
       - uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: windows-build
           path: |
             dist/*.exe
@@ -73,7 +72,6 @@ jobs:
       - run: npm run build:mac -- --publish=never
       - uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: mac-build
           path: |
             dist/*.dmg
@@ -99,3 +97,22 @@ jobs:
             --title "Build #${{ github.run_number }}" \
             --notes "Commit: ${{ needs.bump-version.outputs.sha }}" \
             --repo ${{ github.repository }}
+
+  cleanup-old-artifacts:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete older artifacts (keep only this run's)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.workflow_run.id != ($ENV.RUN_ID | tonumber)) | select(.name | test("^(windows-build|mac-build)$")) | .id' \
+          | while read -r id; do
+              echo "Deleting artifact $id"
+              gh api -X DELETE "repos/$REPO/actions/artifacts/$id"
+            done
