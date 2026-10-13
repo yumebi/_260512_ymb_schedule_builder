@@ -19,7 +19,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Compute next version (各桁0-9、9到達で繰り上げ)
         id: bump
         run: |
@@ -49,7 +49,7 @@ jobs:
           ref: ${{ needs.bump-version.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: npm ci --ignore-scripts
       - run: npm run build:win -- --publish=never
       - uses: actions/upload-artifact@v4
@@ -68,7 +68,7 @@ jobs:
           ref: ${{ needs.bump-version.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: npm ci --ignore-scripts
       - run: npm run build:mac -- --publish=never
       - uses: actions/upload-artifact@v4
