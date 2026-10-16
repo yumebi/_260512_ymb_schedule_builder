@@ -1,8 +1,9 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
-const fsSync = require('fs');
 const ExcelJS = require('exceljs');
+const { atomicWriteFile } = require('./lib/atomicWrite');
+const { createWindowStateKeeper } = require('./lib/windowState');
 
 let mainWindow = null;
 let currentProjectPath = null;
@@ -27,7 +28,7 @@ async function getRecentFiles() {
 async function addRecentFile(filePath) {
   let list = await getRecentFiles();
   list = [filePath, ...list.filter((p) => p !== filePath)].slice(0, RECENT_MAX);
-  await fs.writeFile(recentFilesPath(), JSON.stringify(list, null, 2), 'utf-8');
+  await atomicWriteFile(recentFilesPath(), JSON.stringify(list, null, 2), 'utf-8');
   buildMenu();
 }
 
@@ -43,59 +44,38 @@ async function openRecentFile(filePath) {
     // 存在しないファイルはリストから除外
     let list = await getRecentFiles();
     list = list.filter((p) => p !== filePath);
-    await fs.writeFile(recentFilesPath(), JSON.stringify(list, null, 2), 'utf-8');
+    await atomicWriteFile(recentFilesPath(), JSON.stringify(list, null, 2), 'utf-8');
     buildMenu();
   }
 }
 
 // ---------- ウィンドウ位置・サイズの保存/復元 ----------
-const WINDOW_STATE_MIN_VISIBLE = 80; // px。この値以上画面に重なっていれば「見える」とみなす
+const MIN_WIDTH = 960;
+const MIN_HEIGHT = 600;
 
-function windowStatePath() {
-  return path.join(app.getPath('userData'), 'windowState.json');
-}
-
-async function loadWindowState() {
-  try {
-    const text = await fs.readFile(windowStatePath(), 'utf-8');
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function isBoundsUsable(bounds) {
-  if (!bounds || typeof bounds.x !== 'number' || typeof bounds.y !== 'number') return false;
-  if (!bounds.width || !bounds.height) return false;
-  return screen.getAllDisplays().some((d) => {
-    const a = d.workArea;
-    const overlapX = Math.min(bounds.x + bounds.width, a.x + a.width) - Math.max(bounds.x, a.x);
-    const overlapY = Math.min(bounds.y + bounds.height, a.y + a.height) - Math.max(bounds.y, a.y);
-    return overlapX >= WINDOW_STATE_MIN_VISIBLE && overlapY >= WINDOW_STATE_MIN_VISIBLE;
-  });
-}
-
-function saveWindowStateSync() {
-  if (!mainWindow) return;
-  try {
-    const isMaximized = mainWindow.isMaximized();
-    const bounds = isMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds();
-    fsSync.writeFileSync(windowStatePath(), JSON.stringify({ ...bounds, isMaximized }), 'utf-8');
-  } catch {}
-}
+// 位置・大きさ・最大化の状態を保存して、次回の起動で復元する(移動・サイズ変更の少し後と、閉じるときに保存)。
+// モニタ構成が変わって画面外になる場合は、画面内に補正される。保存先は従来と同じ windowState.json。
+const windowState = createWindowStateKeeper({
+  file: path.join(app.getPath('userData'), 'windowState.json'),
+  defaultWidth: 1400,
+  defaultHeight: 900,
+  minWidth: MIN_WIDTH,
+  minHeight: MIN_HEIGHT,
+  screen,
+});
 
 async function createWindow() {
-  const saved = await loadWindowState();
-  const windowOpts = { width: 1400, height: 900 };
-  if (saved && isBoundsUsable(saved)) {
-    windowOpts.x = saved.x;
-    windowOpts.y = saved.y;
-    windowOpts.width = saved.width;
-    windowOpts.height = saved.height;
-  }
-
+  const state = windowState.load();
   mainWindow = new BrowserWindow({
-    ...windowOpts,
+    x: state.x,
+    y: state.y,
+    width: state.width,
+    height: state.height,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
+    // 描画が整うまで表示しない。表示した瞬間に白い空のウインドウが見えたり、最大化の前に
+    // 通常サイズが一瞬見えたりするのを防ぐ。
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -104,11 +84,13 @@ async function createWindow() {
     title: appTitle(),
     icon: path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
   });
-  if (saved && saved.isMaximized && isBoundsUsable(saved)) {
-    mainWindow.maximize();
-  }
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  mainWindow.on('close', saveWindowStateSync);
+  windowState.manage(mainWindow);
+  mainWindow.once('ready-to-show', () => {
+    // 最大化で終了していた場合は、表示する前に最大化する(通常サイズが一瞬見えるのを防ぐ)。
+    if (state.isMaximized) mainWindow.maximize();
+    mainWindow.show();
+  });
   mainWindow.webContents.once('did-finish-load', () => checkForUpdate());
   await buildMenu();
 }
@@ -173,7 +155,7 @@ async function buildMenu() {
         {
           label: '最近使ったファイルを消去',
           click: async () => {
-            await fs.writeFile(recentFilesPath(), '[]', 'utf-8');
+            await atomicWriteFile(recentFilesPath(), '[]', 'utf-8');
             buildMenu();
           },
         },
@@ -272,7 +254,7 @@ ipcMain.handle('project:save', async (_e, data) => {
     filePath = result.filePath;
   }
   try {
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    await atomicWriteFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
     currentProjectPath = filePath;
     mainWindow.setTitle(appTitle(path.basename(filePath)));
     await addRecentFile(filePath);
@@ -291,7 +273,7 @@ ipcMain.handle('project:saveAs', async (_e, data) => {
   });
   if (result.canceled || !result.filePath) return null;
   try {
-    await fs.writeFile(result.filePath, JSON.stringify(data, null, 2), 'utf-8');
+    await atomicWriteFile(result.filePath, JSON.stringify(data, null, 2), 'utf-8');
     currentProjectPath = result.filePath;
     mainWindow.setTitle(appTitle(path.basename(result.filePath)));
     await addRecentFile(result.filePath);
@@ -323,7 +305,7 @@ ipcMain.handle('state:loadLast', async () => {
 
 ipcMain.handle('state:saveLast', async (_e, data) => {
   try {
-    await fs.writeFile(lastSessionPath(), JSON.stringify(data, null, 2), 'utf-8');
+    await atomicWriteFile(lastSessionPath(), JSON.stringify(data, null, 2), 'utf-8');
     return true;
   } catch {
     return false;
@@ -387,7 +369,7 @@ async function getTemplates() {
 }
 
 async function saveTemplates(list) {
-  await fs.writeFile(templatesPath(), JSON.stringify(list, null, 2), 'utf-8');
+  await atomicWriteFile(templatesPath(), JSON.stringify(list, null, 2), 'utf-8');
 }
 
 ipcMain.handle('template:list', async () => {
@@ -1062,7 +1044,20 @@ async function writeExcelVertical(filePath, data) {
   await wb.xlsx.writeFile(filePath);
 }
 
-app.whenReady().then(createWindow);
+// 二重起動を防ぐ。同じファイルを2つのウインドウで開いて編集し、後から保存した方で上書きしてしまうのを
+// 防ぐ。2つ目を起動したら、すでに開いているウインドウを前面に出す。
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(createWindow);
+}
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });

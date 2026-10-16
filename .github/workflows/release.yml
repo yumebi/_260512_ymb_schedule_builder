@@ -20,6 +20,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # ウインドウ位置の補正や、原子的な書き込みのテスト。バージョン更新の前に実行する。
+      - name: Test
+        run: npm test
       - name: Compute next version (各桁0-9、9到達で繰り上げ)
         id: bump
         run: |

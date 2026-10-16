@@ -11,7 +11,8 @@
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
-    "build:all": "electron-builder -mw"
+    "build:all": "electron-builder -mw",
+    "test": "node --test \"test/*.test.js\""
   },
   "devDependencies": {
     "electron": "^44.3.0",
@@ -29,6 +30,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "lib/**/*",
       "renderer/**/*",
       "package.json"
     ],
