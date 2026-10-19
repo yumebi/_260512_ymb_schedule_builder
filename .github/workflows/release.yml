@@ -55,7 +55,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts
       - run: npm run build:win -- --publish=never
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           retention-days: 1
           name: windows-build
@@ -74,7 +74,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts
       - run: npm run build:mac -- --publish=never
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           retention-days: 1
           name: mac-build
