@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "electron": "^44.9.3",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.17.0"
   },
   "dependencies": {
     "exceljs": "^4.4.0"
