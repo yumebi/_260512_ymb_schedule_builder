@@ -108,6 +108,12 @@
   });
 
 
+  // 並べ替えの矢印ボタン(↑↓)を表示するか。ドラッグ(≡)で並べ替えられるので、既定は非表示。
+  // プロジェクトのデータではなく、画面ごとの好みなので、テーマと同じく localStorage に持つ。
+  function getShowMoveButtons() {
+    try { return localStorage.getItem('showMoveButtons') === '1'; } catch { return false; }
+  }
+
   const EMPTY_STATE = () => ({
     projectName: '',
     startDate: '',
@@ -615,8 +621,8 @@
         <td><select data-field="groupId">${groupOptions}</select></td>
         <td class="color-cell"></td>
         <td>
-          <button class="icon" data-action="up" title="上へ">↑</button>
-          <button class="icon" data-action="down" title="下へ">↓</button>
+          ${getShowMoveButtons() ? `<button class="icon" data-action="up" title="上へ">↑</button>
+          <button class="icon" data-action="down" title="下へ">↓</button>` : ''}
           <button class="icon" data-action="dup" title="複製">⧉</button>
           <button class="icon danger" data-action="del" title="削除">×</button>
         </td>`;
@@ -1560,6 +1566,12 @@
     $('#btn-open-milestones').addEventListener('click', openMilestonesModal);
     $('#btn-open-groups').addEventListener('click', openGroupsModal);
     $('#btn-open-templates').addEventListener('click', openTemplatesModal);
+    const moveChk = $('#chk-move-buttons');
+    moveChk.checked = getShowMoveButtons();
+    moveChk.addEventListener('change', () => {
+      try { localStorage.setItem('showMoveButtons', moveChk.checked ? '1' : '0'); } catch { /* 保存できなくても、この画面では切り替わる */ }
+      render();
+    });
     $('#gantt-zoom').addEventListener('change', (e) => {
       ganttZoom = e.target.value;
       renderGantt();
